@@ -94,8 +94,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/models.MailboxesResponse"
                         }
                     },
                     "401": {
@@ -312,6 +311,44 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "models.Mailbox": {
+            "type": "object",
+            "properties": {
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "totalCount": {
+                    "type": "integer"
+                },
+                "type": {
+                    "description": "\"system\" or \"custom\"",
+                    "type": "string"
+                },
+                "unreadCount": {
+                    "type": "integer"
+                },
+                "userId": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.MailboxesResponse": {
+            "type": "object",
+            "properties": {
+                "mailboxes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Mailbox"
+                    }
+                }
+            }
         }
     },
     "securityDefinitions": {
@@ -333,7 +370,8 @@ var SwaggerInfo = &swag.Spec{
 	Description:      "Backend API for AI Email Box",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
-	// LeftDelim/RightDelim removed for compatibility with current swag.Spec
+	LeftDelim:        "{{",
+	RightDelim:       "}}",
 }
 
 func init() {

@@ -55,3 +55,7 @@ type EmailListResponse struct {
 	PerPage     int      `json:"perPage"`
 	HasNextPage bool     `json:"hasNextPage"`
 }
+
+type MailboxesResponse struct {
+	Mailboxes []Mailbox `json:"mailboxes"`
+}

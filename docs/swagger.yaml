@@ -92,6 +92,31 @@ definitions:
       message:
         type: string
     type: object
+  models.Mailbox:
+    properties:
+      icon:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      totalCount:
+        type: integer
+      type:
+        description: '"system" or "custom"'
+        type: string
+      unreadCount:
+        type: integer
+      userId:
+        type: string
+    type: object
+  models.MailboxesResponse:
+    properties:
+      mailboxes:
+        items:
+          $ref: '#/definitions/models.Mailbox'
+        type: array
+    type: object
 host: localhost:8080
 info:
   contact:
@@ -147,8 +172,7 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/models.MailboxesResponse'
         "401":
           description: Unauthorized
           schema:
