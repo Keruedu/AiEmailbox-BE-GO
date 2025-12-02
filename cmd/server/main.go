@@ -74,6 +74,10 @@ func main() {
 		protected.GET("/mailboxes", emailHandler.GetMailboxes)
 		protected.GET("/mailboxes/:mailboxId/emails", emailHandler.GetEmails)
 		protected.GET("/emails/:emailId", emailHandler.GetEmailDetail)
+		protected.POST("/emails/:emailId/reply", emailHandler.ReplyEmail)
+		protected.POST("/emails/send", emailHandler.SendEmail)
+		protected.POST("/emails/:emailId/modify", emailHandler.ModifyEmail)
+		protected.GET("/attachments/:id", emailHandler.GetAttachment)
 	}
 
 	// Start server

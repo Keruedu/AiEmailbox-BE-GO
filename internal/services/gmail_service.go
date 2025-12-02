@@ -217,26 +217,66 @@ func (s *GmailService) mapGmailMessageToEmail(msg *gmail.Message) models.Email {
 }
 
 func (s *GmailService) getBody(part *gmail.MessagePart) string {
-	if part.Body != nil && part.Body.Data != "" {
-		data, _ := base64.URLEncoding.DecodeString(part.Body.Data)
-		return string(data)
+	// Helper to process plain text
+	processPlainText := func(data string) string {
+		// Convert newlines to <br> for HTML display
+		return strings.ReplaceAll(data, "\n", "<br/>")
 	}
+
+	// Helper to decode base64url
+	decode := func(data string) ([]byte, error) {
+		// Try RawURLEncoding first (no padding)
+		decoded, err := base64.RawURLEncoding.DecodeString(data)
+		if err == nil {
+			return decoded, nil
+		}
+		// Fallback to standard URLEncoding (with padding)
+		return base64.URLEncoding.DecodeString(data)
+	}
+
+	if part.Body != nil && part.Body.Data != "" {
+		data, err := decode(part.Body.Data)
+		if err == nil {
+			if part.MimeType == "text/plain" {
+				return processPlainText(string(data))
+			}
+			return string(data)
+		}
+	}
+
+	var htmlBody, plainBody string
 
 	for _, p := range part.Parts {
 		if p.MimeType == "text/html" {
-			data, _ := base64.URLEncoding.DecodeString(p.Body.Data)
-			return string(data)
+			data, err := decode(p.Body.Data)
+			if err == nil {
+				htmlBody = string(data)
+			}
 		}
 		if p.MimeType == "text/plain" {
-			data, _ := base64.URLEncoding.DecodeString(p.Body.Data)
-			return string(data)
+			data, err := decode(p.Body.Data)
+			if err == nil {
+				plainBody = processPlainText(string(data))
+			}
 		}
-		// Recursive check
+		// Recursive check if we haven't found anything yet
 		if len(p.Parts) > 0 {
-			return s.getBody(p)
+			// This is a bit simplistic for recursion, but let's try to get something
+			subBody := s.getBody(p)
+			if subBody != "" {
+				// If we found something in sub-parts, decide how to use it.
+				// For now, if we don't have htmlBody, use it.
+				if htmlBody == "" {
+					htmlBody = subBody // Assume sub-part returned best effort
+				}
+			}
 		}
 	}
-	return ""
+
+	if htmlBody != "" {
+		return htmlBody
+	}
+	return plainBody
 }
 
 func contains(slice []string, item string) bool {
@@ -270,4 +310,60 @@ func parseAddresses(addrs string) []models.EmailAddress {
 		result = append(result, parseAddress(strings.TrimSpace(p)))
 	}
 	return result
+}
+
+func (s *GmailService) SendEmail(ctx context.Context, user *models.User, email *models.Email) error {
+	srv, err := s.GetClient(ctx, user)
+	if err != nil {
+		return err
+	}
+
+	var message gmail.Message
+
+	// Create the email content
+	// Headers
+	var msgString strings.Builder
+	msgString.WriteString("To: " + email.To[0].Email + "\r\n") // Simplified: only first recipient
+	msgString.WriteString("Subject: " + email.Subject + "\r\n")
+	msgString.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n")
+	msgString.WriteString(email.Body)
+
+	message.Raw = base64.URLEncoding.EncodeToString([]byte(msgString.String()))
+
+	_, err = srv.Users.Messages.Send("me", &message).Do()
+	return err
+}
+
+func (s *GmailService) ModifyEmail(ctx context.Context, user *models.User, emailID string, addLabels, removeLabels []string) error {
+	srv, err := s.GetClient(ctx, user)
+	if err != nil {
+		return err
+	}
+
+	req := &gmail.ModifyMessageRequest{
+		AddLabelIds:    addLabels,
+		RemoveLabelIds: removeLabels,
+	}
+
+	_, err = srv.Users.Messages.Modify("me", emailID, req).Do()
+	return err
+}
+
+func (s *GmailService) GetAttachment(ctx context.Context, user *models.User, messageID, attachmentID string) ([]byte, error) {
+	srv, err := s.GetClient(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	attach, err := srv.Users.Messages.Attachments.Get("me", messageID, attachmentID).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := base64.URLEncoding.DecodeString(attach.Data)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
 }
