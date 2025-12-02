@@ -6,6 +6,7 @@ import (
 	"aiemailbox-be/internal/handlers"
 	"aiemailbox-be/internal/middleware"
 	"aiemailbox-be/internal/repository"
+	"aiemailbox-be/internal/services"
 	"log"
 
 	"github.com/gin-gonic/gin"
@@ -24,11 +25,14 @@ func main() {
 
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(mongodb.Database)
-	emailRepo := repository.NewEmailRepository(mongodb.Database)
+	// emailRepo := repository.NewEmailRepository(mongodb.Database) // Not used for Gmail track
+
+	// Initialize services
+	gmailService := services.NewGmailService(cfg)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(cfg, userRepo)
-	emailHandler := handlers.NewEmailHandler(emailRepo)
+	emailHandler := handlers.NewEmailHandler(gmailService, userRepo)
 
 	// Initialize Gin
 	r := gin.Default()

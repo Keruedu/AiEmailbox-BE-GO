@@ -3,6 +3,7 @@ package handlers
 import (
 	"aiemailbox-be/internal/models"
 	"aiemailbox-be/internal/repository"
+	"aiemailbox-be/internal/services"
 	"context"
 	"net/http"
 	"strconv"
@@ -13,12 +14,14 @@ import (
 )
 
 type EmailHandler struct {
-	emailRepo *repository.EmailRepository
+	gmailService *services.GmailService
+	userRepo     *repository.UserRepository
 }
 
-func NewEmailHandler(emailRepo *repository.EmailRepository) *EmailHandler {
+func NewEmailHandler(gmailService *services.GmailService, userRepo *repository.UserRepository) *EmailHandler {
 	return &EmailHandler{
-		emailRepo: emailRepo,
+		gmailService: gmailService,
+		userRepo:     userRepo,
 	}
 }
 
@@ -33,14 +36,23 @@ func (h *EmailHandler) GetMailboxes(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	mailboxes, err := h.emailRepo.GetMailboxes(ctx, userID.(string))
+	user, err := h.userRepo.FindByID(ctx, userID.(string))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "user_not_found",
+			Message: "User not found",
+		})
+		return
+	}
+
+	mailboxes, err := h.gmailService.ListMailboxes(ctx, user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "server_error",
-			Message: "Failed to load mailboxes",
+			Error:   "gmail_error",
+			Message: "Failed to load mailboxes: " + err.Error(),
 		})
 		return
 	}
@@ -52,7 +64,7 @@ func (h *EmailHandler) GetMailboxes(c *gin.Context) {
 
 // GetEmails returns emails for a specific mailbox with pagination
 func (h *EmailHandler) GetEmails(c *gin.Context) {
-	_, exists := c.Get("userID")
+	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "unauthorized",
@@ -65,30 +77,39 @@ func (h *EmailHandler) GetEmails(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	emails, total, err := h.emailRepo.GetEmails(ctx, mailboxID, page, perPage)
+	user, err := h.userRepo.FindByID(ctx, userID.(string))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "user_not_found",
+			Message: "User not found",
+		})
+		return
+	}
+
+	emails, total, err := h.gmailService.ListEmails(ctx, user, mailboxID, page, perPage)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "server_error",
-			Message: "Failed to load emails",
+			Error:   "gmail_error",
+			Message: "Failed to load emails: " + err.Error(),
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, models.EmailListResponse{
 		Emails:      emails,
-		Total:       total,
+		Total:       total, // This is estimate
 		Page:        page,
 		PerPage:     perPage,
-		HasNextPage: page*perPage < total,
+		HasNextPage: false, // Simplified for now
 	})
 }
 
 // GetEmailDetail returns detailed information about a specific email
 func (h *EmailHandler) GetEmailDetail(c *gin.Context) {
-	_, exists := c.Get("userID")
+	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "unauthorized",
@@ -99,10 +120,19 @@ func (h *EmailHandler) GetEmailDetail(c *gin.Context) {
 
 	emailID := c.Param("emailId")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	email, err := h.emailRepo.GetEmailByID(ctx, emailID)
+	user, err := h.userRepo.FindByID(ctx, userID.(string))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "user_not_found",
+			Message: "User not found",
+		})
+		return
+	}
+
+	email, err := h.gmailService.GetEmail(ctx, user, emailID)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			c.JSON(http.StatusNotFound, models.ErrorResponse{
@@ -112,8 +142,8 @@ func (h *EmailHandler) GetEmailDetail(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "server_error",
-			Message: "Failed to load email",
+			Error:   "gmail_error",
+			Message: "Failed to load email: " + err.Error(),
 		})
 		return
 	}

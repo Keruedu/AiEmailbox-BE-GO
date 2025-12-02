@@ -15,8 +15,14 @@ type User struct {
 	Provider     string    `json:"provider" bson:"provider"` // "email" or "google"
 	GoogleID     string    `json:"-" bson:"googleId,omitempty"`
 	RefreshToken string    `json:"-" bson:"refreshToken,omitempty"`
-	CreatedAt    time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt" bson:"updatedAt"`
+
+	// Google OAuth Tokens
+	GoogleRefreshToken string    `json:"-" bson:"googleRefreshToken,omitempty"`
+	GoogleAccessToken  string    `json:"-" bson:"googleAccessToken,omitempty"`
+	GoogleTokenExpiry  time.Time `json:"-" bson:"googleTokenExpiry,omitempty"`
+
+	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 type LoginRequest struct {

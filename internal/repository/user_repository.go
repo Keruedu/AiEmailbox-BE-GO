@@ -23,18 +23,18 @@ func NewUserRepository(db *mongo.Database) *UserRepository {
 func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
 	user.CreatedAt = time.Now()
 	user.UpdatedAt = time.Now()
-	
+
 	// If ID is not set, generate a new one
 	if user.ID.IsZero() {
 		user.ID = primitive.NewObjectID()
 	}
-	
+
 	// Insert the user directly (MongoDB will use the _id field from the struct)
 	_, err := r.collection.InsertOne(ctx, user)
 	if err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -52,7 +52,7 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*models.User,
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var user models.User
 	err = r.collection.FindOne(ctx, bson.M{"_id": oid}).Decode(&user)
 	if err != nil {
@@ -72,7 +72,7 @@ func (r *UserRepository) FindByGoogleID(ctx context.Context, googleID string) (*
 
 func (r *UserRepository) Update(ctx context.Context, user *models.User) error {
 	user.UpdatedAt = time.Now()
-	
+
 	update := bson.M{
 		"$set": bson.M{
 			"email":        user.Email,
@@ -82,7 +82,7 @@ func (r *UserRepository) Update(ctx context.Context, user *models.User) error {
 			"updatedAt":    user.UpdatedAt,
 		},
 	}
-	
+
 	_, err := r.collection.UpdateOne(ctx, bson.M{"_id": user.ID}, update)
 	return err
 }
@@ -92,14 +92,37 @@ func (r *UserRepository) UpdateRefreshToken(ctx context.Context, userID, refresh
 	if err != nil {
 		return err
 	}
-	
+
 	update := bson.M{
 		"$set": bson.M{
 			"refreshToken": refreshToken,
 			"updatedAt":    time.Now(),
 		},
 	}
-	
+
+	_, err = r.collection.UpdateOne(ctx, bson.M{"_id": oid}, update)
+	return err
+}
+
+func (r *UserRepository) UpdateGoogleTokens(ctx context.Context, userID, accessToken, refreshToken string, expiry time.Time) error {
+	oid, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return err
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"googleAccessToken": accessToken,
+			"googleTokenExpiry": expiry,
+			"updatedAt":         time.Now(),
+		},
+	}
+
+	// Only update refresh token if it's provided (it might not be returned in every exchange)
+	if refreshToken != "" {
+		update["$set"].(bson.M)["googleRefreshToken"] = refreshToken
+	}
+
 	_, err = r.collection.UpdateOne(ctx, bson.M{"_id": oid}, update)
 	return err
 }
