@@ -1,3 +1,17 @@
+// @title AI Email Box API
+// @version 1.0
+// @description Backend API for AI Email Box
+// @termsOfService http://swagger.io/terms/
+// @contact.name API Support
+// @contact.email support@example.com
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+// @host localhost:8080
+// @BasePath /api
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name Authorization
+
 package main
 
 import (
@@ -10,6 +24,11 @@ import (
 	"log"
 
 	"github.com/gin-gonic/gin"
+
+	_ "aiemailbox-be/docs"
+
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 func main() {
@@ -79,6 +98,9 @@ func main() {
 	// Start server
 	log.Printf("Server starting on port %s", cfg.Port)
 	log.Printf("Connected to MongoDB: %s", cfg.MongoDBDatabase)
+	// Swagger route
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}

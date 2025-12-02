@@ -26,6 +26,16 @@ func NewEmailHandler(gmailService *services.GmailService, userRepo *repository.U
 }
 
 // GetMailboxes returns all mailboxes for the authenticated user
+// GetMailboxes godoc
+// @Summary      Get mailboxes
+// @Description  Returns all mailboxes for the authenticated user
+// @Tags         emails
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Failure      401  {object}  models.ErrorResponse
+// @Failure      500  {object}  models.ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /mailboxes [get]
 func (h *EmailHandler) GetMailboxes(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
@@ -63,6 +73,19 @@ func (h *EmailHandler) GetMailboxes(c *gin.Context) {
 }
 
 // GetEmails returns emails for a specific mailbox with pagination
+// GetEmails godoc
+// @Summary      List emails
+// @Description  Returns emails for a specific mailbox with pagination
+// @Tags         emails
+// @Produce      json
+// @Param        mailboxId   path      string  true  "Mailbox ID"
+// @Param        page        query     int     false "Page number"
+// @Param        limit       query     int     false "Items per page"
+// @Success      200  {object}  models.EmailListResponse
+// @Failure      401  {object}  models.ErrorResponse
+// @Failure      500  {object}  models.ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /mailboxes/{mailboxId}/emails [get]
 func (h *EmailHandler) GetEmails(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
@@ -108,6 +131,18 @@ func (h *EmailHandler) GetEmails(c *gin.Context) {
 }
 
 // GetEmailDetail returns detailed information about a specific email
+// GetEmailDetail godoc
+// @Summary      Get email detail
+// @Description  Returns detailed information about a specific email
+// @Tags         emails
+// @Produce      json
+// @Param        emailId   path      string  true  "Email ID"
+// @Success      200  {object}  models.Email
+// @Failure      401  {object}  models.ErrorResponse
+// @Failure      404  {object}  models.ErrorResponse
+// @Failure      500  {object}  models.ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /emails/{emailId} [get]
 func (h *EmailHandler) GetEmailDetail(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
