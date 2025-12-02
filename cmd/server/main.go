@@ -95,11 +95,12 @@ func main() {
 		protected.GET("/emails/:emailId", emailHandler.GetEmailDetail)
 	}
 
+	// Swagger route
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	// Start server
 	log.Printf("Server starting on port %s", cfg.Port)
 	log.Printf("Connected to MongoDB: %s", cfg.MongoDBDatabase)
-	// Swagger route
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatal("Failed to start server:", err)

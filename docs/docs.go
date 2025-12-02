@@ -370,8 +370,6 @@ var SwaggerInfo = &swag.Spec{
 	Description:      "Backend API for AI Email Box",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
-	LeftDelim:        "{{",
-	RightDelim:       "}}",
 }
 
 func init() {
