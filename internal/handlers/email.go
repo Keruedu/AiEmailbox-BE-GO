@@ -31,7 +31,7 @@ func NewEmailHandler(gmailService *services.GmailService, userRepo *repository.U
 // @Description  Returns all mailboxes for the authenticated user
 // @Tags         emails
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  models.MailboxesResponse
 // @Failure      401  {object}  models.ErrorResponse
 // @Failure      500  {object}  models.ErrorResponse
 // @Security     ApiKeyAuth
@@ -67,8 +67,8 @@ func (h *EmailHandler) GetMailboxes(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"mailboxes": mailboxes,
+	c.JSON(http.StatusOK, models.MailboxesResponse{
+		Mailboxes: mailboxes,
 	})
 }
 
