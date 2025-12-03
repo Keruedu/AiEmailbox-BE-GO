@@ -377,16 +377,75 @@ The application uses in-memory mock data for:
 
 In production, replace with a real database (PostgreSQL, MongoDB, etc.)
 
+## Acknowledgments
+
+- Gin Web Framework
+- JWT-Go
+- Google OAuth2 API
+
+## API Documentation (Swaggo)
+
+This project uses Swaggo to generate OpenAPI/Swagger documentation from Go annotations.
+
+- Generated docs are placed under the `docs/` directory: `docs/swagger.json` and `docs/swagger.yaml` and a generated Go file `docs/docs.go`.
+- The Swagger UI is served at `/swagger/index.html` (e.g. `http://localhost:8080/swagger/index.html`).
+
+Quick usage (MVP):
+
+1. Install the `swag` CLI (one-time):
+
+```bash
+go install github.com/swaggo/swag/cmd/swag@latest
+```
+
+2. Add the runtime dependencies (one-time) and tidy modules:
+
+```bash
+go get github.com/swaggo/gin-swagger@latest github.com/swaggo/files@latest
+go mod tidy
+```
+
+3. Generate docs from source annotations (run whenever you change annotations or API signatures):
+
+```bash
+swag init -g cmd/server/main.go -o docs
+```
+
+4. Run the server (ensure environment variables are set, see "Configure environment variables"):
+
+```bash
+# example for bash
+export MONGODB_URI='mongodb://localhost:27017'
+export MONGODB_DATABASE='aiemailbox'
+export PORT=8080
+
+go run ./cmd/server
+```
+
+5. Open the Swagger UI in your browser:
+
+```
+http://localhost:8080/swagger/index.html
+```
+
+Notes and tips:
+
+- The project registers the Swagger route with `github.com/swaggo/gin-swagger` at `/swagger/*any` and includes the generated docs via a blank import (e.g. `_ "aiemailbox-be/docs"`).
+- The Swagger generation relies on comments (annotations) placed above handlers and models. Example annotation patterns are already added to `internal/handlers/email.go`.
+- If you regenerate `docs/`, commit the updated `docs/` files if you want the generated spec to be part of the repository. Alternatively, add a CI job to regenerate and publish the spec/artifacts.
+- The generated file `docs/docs.go` is a Go source file; keep it compatible with the `swag` CLI version you use. If you upgrade `swag`, re-run `swag init`.
+- The OpenAPI files `docs/swagger.yaml` and `docs/swagger.json` can be used with other UIs such as Redoc or hosted externally.
+
+Security note:
+
+- The API uses `Authorization: Bearer <token>` (JWT) for protected routes; the Swagger docs include a security definition for the `Authorization` header. When trying calls from the Swagger UI, set the Authorization header appropriately (e.g., `Bearer <access-token>`).
+
 ## License
 
 MIT
 
 ## Contributors
 
-- Your Name - Initial work
-
-## Acknowledgments
-
-- Gin Web Framework
-- JWT-Go
-- Google OAuth2 API
+- Mai Xuân Quý (22120303)
+- Lê Hoàng Việt (22120430)
+- Trương Lê Anh Vũ (22120443)

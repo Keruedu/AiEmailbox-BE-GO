@@ -1,0 +1,231 @@
+basePath: /api
+definitions:
+  models.Attachment:
+    properties:
+      filename:
+        type: string
+      id:
+        type: string
+      mimeType:
+        type: string
+      size:
+        type: integer
+      url:
+        type: string
+    type: object
+  models.Email:
+    properties:
+      attachments:
+        items:
+          $ref: '#/definitions/models.Attachment'
+        type: array
+      bcc:
+        items:
+          $ref: '#/definitions/models.EmailAddress'
+        type: array
+      body:
+        type: string
+      cc:
+        items:
+          $ref: '#/definitions/models.EmailAddress'
+        type: array
+      createdAt:
+        type: string
+      from:
+        $ref: '#/definitions/models.EmailAddress'
+      hasAttachments:
+        type: boolean
+      id:
+        description: Changed to string for Gmail ID
+        type: string
+      isRead:
+        type: boolean
+      isStarred:
+        type: boolean
+      labels:
+        items:
+          type: string
+        type: array
+      mailboxId:
+        type: string
+      preview:
+        type: string
+      receivedAt:
+        type: string
+      subject:
+        type: string
+      threadId:
+        type: string
+      to:
+        items:
+          $ref: '#/definitions/models.EmailAddress'
+        type: array
+      userId:
+        type: string
+    type: object
+  models.EmailAddress:
+    properties:
+      email:
+        type: string
+      name:
+        type: string
+    type: object
+  models.EmailListResponse:
+    properties:
+      emails:
+        items:
+          $ref: '#/definitions/models.Email'
+        type: array
+      hasNextPage:
+        type: boolean
+      page:
+        type: integer
+      perPage:
+        type: integer
+      total:
+        type: integer
+    type: object
+  models.ErrorResponse:
+    properties:
+      error:
+        type: string
+      message:
+        type: string
+    type: object
+  models.Mailbox:
+    properties:
+      icon:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      totalCount:
+        type: integer
+      type:
+        description: '"system" or "custom"'
+        type: string
+      unreadCount:
+        type: integer
+      userId:
+        type: string
+    type: object
+  models.MailboxesResponse:
+    properties:
+      mailboxes:
+        items:
+          $ref: '#/definitions/models.Mailbox'
+        type: array
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@example.com
+    name: API Support
+  description: Backend API for AI Email Box
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: AI Email Box API
+  version: "1.0"
+paths:
+  /emails/{emailId}:
+    get:
+      description: Returns detailed information about a specific email
+      parameters:
+      - description: Email ID
+        in: path
+        name: emailId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Email'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get email detail
+      tags:
+      - emails
+  /mailboxes:
+    get:
+      description: Returns all mailboxes for the authenticated user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.MailboxesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get mailboxes
+      tags:
+      - emails
+  /mailboxes/{mailboxId}/emails:
+    get:
+      description: Returns emails for a specific mailbox with pagination
+      parameters:
+      - description: Mailbox ID
+        in: path
+        name: mailboxId
+        required: true
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.EmailListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List emails
+      tags:
+      - emails
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
