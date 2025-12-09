@@ -47,10 +47,15 @@ func idFilter(emailID string) bson.M {
 	return bson.M{"_id": emailID}
 }
 
-// GetKanban returns emails grouped by status. Snoozed emails are excluded.
-func (r *EmailRepository) GetKanban(ctx context.Context) (map[string][]models.Email, error) {
+// GetKanban returns emails grouped by status for a specific user. Snoozed emails are excluded.
+func (r *EmailRepository) GetKanban(ctx context.Context, userID string) (map[string][]models.Email, error) {
 	// fetch all emails (include snoozed so frontend can render a Snoozed column)
-	filter := bson.M{}
+	// fetch all emails (include snoozed so frontend can render a Snoozed column)
+	filter := bson.M{
+		"userId":    userID,
+		"labels":    bson.M{"$ne": "TRASH"},
+		"mailboxId": bson.M{"$ne": "TRASH"},
+	}
 	findOptions := options.Find()
 	findOptions.SetSort(bson.D{{Key: "receivedAt", Value: -1}})
 
@@ -223,5 +228,14 @@ func (r *EmailRepository) UpdateMailboxUnreadCount(ctx context.Context, mailboxI
 		},
 	}
 	_, err := r.mailboxCollection.UpdateOne(ctx, bson.M{"id": mailboxID}, update)
+	return err
+}
+
+// UpsertEmail updates an existing email or inserts a new one
+func (r *EmailRepository) UpsertEmail(ctx context.Context, email *models.Email) error {
+	filter := bson.M{"_id": email.ID} // email.ID is now string from Gmail ID
+	update := bson.M{"$set": email}
+	opts := options.Update().SetUpsert(true)
+	_, err := r.emailCollection.UpdateOne(ctx, filter, update, opts)
 	return err
 }

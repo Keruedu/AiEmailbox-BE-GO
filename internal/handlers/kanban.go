@@ -28,8 +28,10 @@ type Card struct {
 	Sender       string     `json:"sender"`
 	Subject      string     `json:"subject"`
 	Summary      string     `json:"summary"`
+	Preview      string     `json:"preview"`
 	GmailURL     string     `json:"gmail_url"`
 	SnoozedUntil *time.Time `json:"snoozed_until,omitempty"`
+	ReceivedAt   time.Time  `json:"received_at"`
 }
 
 // ColMeta describes a single column metadata item returned by /api/kanban/meta
@@ -65,8 +67,13 @@ type SummarizeRequest struct {
 // @Failure 500 {object} models.ErrorResponse
 // @Router /kanban [get]
 func (h *KanbanHandler) GetKanban(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
 	ctx := c.Request.Context()
-	board, err := h.repo.GetKanban(ctx)
+	board, err := h.repo.GetKanban(ctx, userID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -84,8 +91,10 @@ func (h *KanbanHandler) GetKanban(c *gin.Context) {
 				Sender:       sender,
 				Subject:      e.Subject,
 				Summary:      e.Summary,
+				Preview:      e.Preview,
 				GmailURL:     e.GmailURL,
 				SnoozedUntil: e.SnoozedUntil,
+				ReceivedAt:   e.ReceivedAt,
 			}
 			resp[status] = append(resp[status], card)
 		}

@@ -16,12 +16,14 @@ import (
 type EmailHandler struct {
 	gmailService *services.GmailService
 	userRepo     *repository.UserRepository
+	emailRepo    *repository.EmailRepository
 }
 
-func NewEmailHandler(gmailService *services.GmailService, userRepo *repository.UserRepository) *EmailHandler {
+func NewEmailHandler(gmailService *services.GmailService, userRepo *repository.UserRepository, emailRepo *repository.EmailRepository) *EmailHandler {
 	return &EmailHandler{
 		gmailService: gmailService,
 		userRepo:     userRepo,
+		emailRepo:    emailRepo,
 	}
 }
 
@@ -120,6 +122,30 @@ func (h *EmailHandler) GetEmails(c *gin.Context) {
 		})
 		return
 	}
+
+	// Sync emails to database for Kanban
+	// Note: In a real app, this should be a background job or separate goroutine
+	// but here we do it inline for simplicity to ensure Kanban is populated.
+	// We run it in a goroutine so user doesn't wait too long, but context needs to be background then.
+	// Actually, let's do it synchronously to ensure data is there if they switch tabs immediately,
+	// or use a detached context.
+	go func(emails []*models.Email) {
+		syncCtx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+		defer cancel()
+		for _, e := range emails {
+			// Preserve existing status if exists, else default to Inbox
+			existing, err := h.emailRepo.GetByID(syncCtx, e.ID)
+			if err == nil && existing != nil {
+				e.Status = existing.Status
+				e.SnoozedUntil = existing.SnoozedUntil
+				e.Summary = existing.Summary
+			} else {
+				e.Status = models.StatusInbox
+			}
+			e.UserID = user.ID.Hex()
+			_ = h.emailRepo.UpsertEmail(syncCtx, e)
+		}
+	}(emails)
 
 	c.JSON(http.StatusOK, models.EmailListResponse{
 		Emails:      emails,

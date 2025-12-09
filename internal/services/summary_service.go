@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"html"
 	"net/http"
 	"regexp"
 	"sort"
@@ -49,6 +51,10 @@ func (s *LocalSummaryService) SummarizeAndSave(ctx context.Context, emailID stri
 	if text == "" {
 		text = strings.TrimSpace(email.Preview)
 	}
+
+	// Clean HTML
+	text = stripHTML(text)
+
 	summary, err := s.SummarizeText(ctx, text)
 	if err != nil {
 		return "", err
@@ -220,4 +226,51 @@ func extractiveSummary(text string, topSentences int, maxChars int) string {
 		result = result[:maxChars]
 	}
 	return strings.TrimSpace(result)
+}
+
+// stripHTML removes HTML tags, scripts, and styles from text
+func stripHTML(input string) string {
+	original := input
+	// Remove script tags and content
+	reScript := regexp.MustCompile(`(?si)<script[^>]*>.*?</script>`)
+	input = reScript.ReplaceAllString(input, " ")
+
+	// Remove style tags and content
+	reStyle := regexp.MustCompile(`(?si)<style[^>]*>.*?</style>`)
+	input = reStyle.ReplaceAllString(input, " ")
+
+	// Remove comments
+	reComment := regexp.MustCompile(`(?s)<!--.*?-->`)
+	input = reComment.ReplaceAllString(input, " ")
+
+	// Remove HTML tags
+	reTags := regexp.MustCompile(`<[^>]*>`)
+	input = reTags.ReplaceAllString(input, " ")
+
+	// Decode all HTML entities
+	input = html.UnescapeString(input)
+
+	// Remove zero-width characters and other invisible formatting
+	reInvisible := regexp.MustCompile(`[\x{200B}-\x{200D}\x{FEFF}]`)
+	input = reInvisible.ReplaceAllString(input, "")
+
+	// Collapse whitespace
+	reSpace := regexp.MustCompile(`\s+`)
+	input = reSpace.ReplaceAllString(input, " ")
+
+	result := strings.TrimSpace(input)
+
+	// Debug logging
+	if len(original) > 50 {
+		fmt.Printf("[DEBUG] stripHTML input (start): %s...\n", original[:50])
+	} else {
+		fmt.Printf("[DEBUG] stripHTML input: %s\n", original)
+	}
+	if len(result) > 50 {
+		fmt.Printf("[DEBUG] stripHTML output (start): %s...\n", result[:50])
+	} else {
+		fmt.Printf("[DEBUG] stripHTML output: %s\n", result)
+	}
+
+	return result
 }

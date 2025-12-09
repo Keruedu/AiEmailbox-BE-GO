@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -181,13 +182,13 @@ func (s *GmailService) mapGmailMessageToEmail(msg *gmail.Message) models.Email {
 		case "To":
 			to = header.Value
 		case "Date":
-			// Parse date
-			// Gmail date format: "Tue, 2 Dec 2025 22:00:00 +0700"
-			d, err := time.Parse("Mon, 2 Jan 2006 15:04:05 -0700", header.Value)
+			// Parse date using net/mail
+			d, err := mail.ParseDate(header.Value)
 			if err == nil {
 				date = d
 			} else {
-				// Try other formats or just use now
+				// Fallback to time.Parse for strict formats if mail.ParseDate failed (though it covers most)
+				// or just use Now()
 				date = time.Now()
 			}
 		}

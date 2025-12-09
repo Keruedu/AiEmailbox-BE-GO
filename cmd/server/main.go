@@ -59,7 +59,7 @@ func main() {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(cfg, userRepo)
-	emailHandler := handlers.NewEmailHandler(gmailService, userRepo)
+	emailHandler := handlers.NewEmailHandler(gmailService, userRepo, emailRepo)
 	kanbanHandler := handlers.NewKanbanHandler(emailRepo, summaryService, cfg)
 
 	// Initialize Gin
