@@ -19,7 +19,6 @@ import (
 	"aiemailbox-be/internal/database"
 	"aiemailbox-be/internal/handlers"
 	"aiemailbox-be/internal/middleware"
-	"aiemailbox-be/internal/models"
 	"aiemailbox-be/internal/repository"
 	"aiemailbox-be/internal/services"
 	"context"
@@ -118,24 +117,17 @@ func main() {
 	// Start server
 	log.Printf("Server starting on port %s", cfg.Port)
 	log.Printf("Connected to MongoDB: %s", cfg.MongoDBDatabase)
-	// Start snooze worker (runs in background)
-	go func() {
-		interval := time.Minute
-		ticker := time.NewTicker(interval)
-		for range ticker.C {
-			now := time.Now()
-			due, err := emailRepo.ListSnoozedDue(context.Background(), now)
-			if err != nil {
-				log.Println("snooze worker: error listing due emails:", err)
-				continue
-			}
-			for _, e := range due {
-				if err := emailRepo.UpdateStatus(context.Background(), e.ID, string(models.StatusInbox)); err != nil {
-					log.Println("snooze worker: failed to restore email:", e.ID, err)
-				}
-			}
+	// Start snooze worker (runs in background) with configurable interval via SNOOZE_CHECK_INTERVAL
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	interval := time.Minute
+	if v := os.Getenv("SNOOZE_CHECK_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			interval = d
 		}
-	}()
+	}
+	services.StartSnoozeWorker(ctx, interval, emailRepo)
 
 	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatal("Failed to start server:", err)
