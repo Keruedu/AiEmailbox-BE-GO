@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"aiemailbox-be/config"
+	"aiemailbox-be/internal/models"
 	"aiemailbox-be/internal/repository"
 	"aiemailbox-be/internal/services"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,10 +15,11 @@ import (
 type KanbanHandler struct {
 	repo    *repository.EmailRepository
 	summary services.SummaryService
+	cfg     *config.Config
 }
 
-func NewKanbanHandler(repo *repository.EmailRepository, summary services.SummaryService) *KanbanHandler {
-	return &KanbanHandler{repo: repo, summary: summary}
+func NewKanbanHandler(repo *repository.EmailRepository, summary services.SummaryService, cfg *config.Config) *KanbanHandler {
+	return &KanbanHandler{repo: repo, summary: summary, cfg: cfg}
 }
 
 // Card represents the Kanban card shape returned to the client
@@ -116,4 +120,45 @@ func (h *KanbanHandler) Summarize(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "summary": summary})
+}
+
+// GET /api/kanban/meta
+// Returns ordered columns with keys and labels for frontend to render
+func (h *KanbanHandler) Meta(c *gin.Context) {
+	cols := h.cfg.KanbanColumns
+	// helper to normalize label -> key
+	normalize := func(s string) string {
+		s = strings.ToLower(strings.TrimSpace(s))
+		s = strings.ReplaceAll(s, " ", "_")
+		return s
+	}
+
+	// map some common labels to canonical status keys
+	canonical := map[string]string{
+		"inbox":       string(models.StatusInbox),
+		"to do":       string(models.StatusTodo),
+		"todo":        string(models.StatusTodo),
+		"in progress": string(models.StatusInProgress),
+		"in_progress": string(models.StatusInProgress),
+		"done":        string(models.StatusDone),
+		"snoozed":     string(models.StatusSnoozed),
+	}
+
+	type ColMeta struct {
+		Key   string `json:"key"`
+		Label string `json:"label"`
+	}
+
+	var out []ColMeta
+	for _, l := range cols {
+		norm := strings.ToLower(strings.TrimSpace(l))
+		key, ok := canonical[norm]
+		if !ok {
+			// fallback: normalized slug
+			key = normalize(l)
+		}
+		out = append(out, ColMeta{Key: key, Label: l})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"columns": out})
 }

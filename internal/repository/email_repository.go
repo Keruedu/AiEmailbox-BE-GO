@@ -49,8 +49,8 @@ func idFilter(emailID string) bson.M {
 
 // GetKanban returns emails grouped by status. Snoozed emails are excluded.
 func (r *EmailRepository) GetKanban(ctx context.Context) (map[string][]models.Email, error) {
-	// fetch all non-snoozed emails
-	filter := bson.M{"status": bson.M{"$ne": string(models.StatusSnoozed)}}
+	// fetch all emails (include snoozed so frontend can render a Snoozed column)
+	filter := bson.M{}
 	findOptions := options.Find()
 	findOptions.SetSort(bson.D{{Key: "receivedAt", Value: -1}})
 

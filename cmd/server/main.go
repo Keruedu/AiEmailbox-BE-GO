@@ -60,7 +60,7 @@ func main() {
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(cfg, userRepo)
 	emailHandler := handlers.NewEmailHandler(gmailService, userRepo)
-	kanbanHandler := handlers.NewKanbanHandler(emailRepo, summaryService)
+	kanbanHandler := handlers.NewKanbanHandler(emailRepo, summaryService, cfg)
 
 	// Initialize Gin
 	r := gin.Default()
@@ -109,6 +109,7 @@ func main() {
 
 		// Kanban routes
 		protected.GET("/kanban", kanbanHandler.GetKanban)
+		protected.GET("/kanban/meta", kanbanHandler.Meta)
 		protected.POST("/kanban/move", kanbanHandler.Move)
 		protected.POST("/kanban/snooze", kanbanHandler.Snooze)
 		protected.POST("/kanban/summarize", kanbanHandler.Summarize)
