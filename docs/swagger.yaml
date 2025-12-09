@@ -1,5 +1,48 @@
 basePath: /api
 definitions:
+  handlers.Card:
+    properties:
+      gmail_url:
+        type: string
+      id:
+        type: string
+      sender:
+        type: string
+      snoozed_until:
+        type: string
+      subject:
+        type: string
+      summary:
+        type: string
+    type: object
+  handlers.MoveRequest:
+    properties:
+      email_id:
+        type: string
+      to_status:
+        type: string
+    required:
+    - email_id
+    - to_status
+    type: object
+  handlers.SnoozeRequest:
+    properties:
+      email_id:
+        type: string
+      until:
+        description: RFC3339
+        type: string
+    required:
+    - email_id
+    - until
+    type: object
+  handlers.SummarizeRequest:
+    properties:
+      email_id:
+        type: string
+    required:
+    - email_id
+    type: object
   models.Attachment:
     properties:
       filename:
@@ -33,6 +76,8 @@ definitions:
         type: string
       from:
         $ref: '#/definitions/models.EmailAddress'
+      gmailUrl:
+        type: string
       hasAttachments:
         type: boolean
       id:
@@ -52,7 +97,15 @@ definitions:
         type: string
       receivedAt:
         type: string
+      snoozedUntil:
+        type: string
+      status:
+        allOf:
+        - $ref: '#/definitions/models.EmailStatus'
+        description: Workflow fields for Kanban
       subject:
+        type: string
+      summary:
         type: string
       threadId:
         type: string
@@ -85,6 +138,20 @@ definitions:
       total:
         type: integer
     type: object
+  models.EmailStatus:
+    enum:
+    - inbox
+    - todo
+    - in_progress
+    - done
+    - snoozed
+    type: string
+    x-enum-varnames:
+    - StatusInbox
+    - StatusTodo
+    - StatusInProgress
+    - StatusDone
+    - StatusSnoozed
   models.ErrorResponse:
     properties:
       error:
@@ -163,6 +230,114 @@ paths:
       summary: Get email detail
       tags:
       - emails
+  /kanban:
+    get:
+      description: Return kanban columns with cards
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                $ref: '#/definitions/handlers.Card'
+              type: array
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get Kanban board
+      tags:
+      - kanban
+  /kanban/move:
+    post:
+      parameters:
+      - description: Move payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.MoveRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Move a card to another column
+      tags:
+      - kanban
+  /kanban/snooze:
+    post:
+      parameters:
+      - description: Snooze payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SnoozeRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Snooze a card until a given time
+      tags:
+      - kanban
+  /kanban/summarize:
+    post:
+      parameters:
+      - description: Summarize payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SummarizeRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Generate summary for an email
+      tags:
+      - kanban
   /mailboxes:
     get:
       description: Returns all mailboxes for the authenticated user

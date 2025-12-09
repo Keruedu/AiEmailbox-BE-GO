@@ -32,7 +32,38 @@ type Card struct {
 	SnoozedUntil *time.Time `json:"snoozed_until,omitempty"`
 }
 
+// ColMeta describes a single column metadata item returned by /api/kanban/meta
+type ColMeta struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+}
+
+// MoveRequest is the payload for moving a card between columns
+type MoveRequest struct {
+	EmailID  string `json:"email_id" binding:"required"`
+	ToStatus string `json:"to_status" binding:"required"`
+}
+
+// SnoozeRequest is the payload for snoozing a card until a given time
+type SnoozeRequest struct {
+	EmailID string `json:"email_id" binding:"required"`
+	Until   string `json:"until" binding:"required"` // RFC3339
+}
+
+// SummarizeRequest requests generation of a summary for an email
+type SummarizeRequest struct {
+	EmailID string `json:"email_id" binding:"required"`
+}
+
 // GET /api/kanban
+// GetKanban godoc
+// @Summary Get Kanban board
+// @Description Return kanban columns with cards
+// @Tags kanban
+// @Security ApiKeyAuth
+// @Success 200 {object} map[string][]handlers.Card
+// @Failure 500 {object} models.ErrorResponse
+// @Router /kanban [get]
 func (h *KanbanHandler) GetKanban(c *gin.Context) {
 	ctx := c.Request.Context()
 	board, err := h.repo.GetKanban(ctx)
@@ -63,11 +94,17 @@ func (h *KanbanHandler) GetKanban(c *gin.Context) {
 }
 
 // POST /api/kanban/move
+// Move godoc
+// @Summary Move a card to another column
+// @Tags kanban
+// @Security ApiKeyAuth
+// @Param payload body handlers.MoveRequest true "Move payload"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /kanban/move [post]
 func (h *KanbanHandler) Move(c *gin.Context) {
-	var body struct {
-		EmailID  string `json:"email_id" binding:"required"`
-		ToStatus string `json:"to_status" binding:"required"`
-	}
+	var body MoveRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -82,11 +119,17 @@ func (h *KanbanHandler) Move(c *gin.Context) {
 }
 
 // POST /api/kanban/snooze
+// Snooze godoc
+// @Summary Snooze a card until a given time
+// @Tags kanban
+// @Security ApiKeyAuth
+// @Param payload body handlers.SnoozeRequest true "Snooze payload"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /kanban/snooze [post]
 func (h *KanbanHandler) Snooze(c *gin.Context) {
-	var body struct {
-		EmailID string `json:"email_id" binding:"required"`
-		Until   string `json:"until" binding:"required"`
-	}
+	var body SnoozeRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -105,10 +148,17 @@ func (h *KanbanHandler) Snooze(c *gin.Context) {
 }
 
 // POST /api/kanban/summarize
+// Summarize godoc
+// @Summary Generate summary for an email
+// @Tags kanban
+// @Security ApiKeyAuth
+// @Param payload body handlers.SummarizeRequest true "Summarize payload"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /kanban/summarize [post]
 func (h *KanbanHandler) Summarize(c *gin.Context) {
-	var body struct {
-		EmailID string `json:"email_id" binding:"required"`
-	}
+	var body SummarizeRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -142,11 +192,6 @@ func (h *KanbanHandler) Meta(c *gin.Context) {
 		"in_progress": string(models.StatusInProgress),
 		"done":        string(models.StatusDone),
 		"snoozed":     string(models.StatusSnoozed),
-	}
-
-	type ColMeta struct {
-		Key   string `json:"key"`
-		Label string `json:"label"`
 	}
 
 	var out []ColMeta
