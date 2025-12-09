@@ -19,9 +19,13 @@ import (
 	"aiemailbox-be/internal/database"
 	"aiemailbox-be/internal/handlers"
 	"aiemailbox-be/internal/middleware"
+	"aiemailbox-be/internal/models"
 	"aiemailbox-be/internal/repository"
 	"aiemailbox-be/internal/services"
+	"context"
 	"log"
+	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -44,14 +48,17 @@ func main() {
 
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(mongodb.Database)
-	// emailRepo := repository.NewEmailRepository(mongodb.Database) // Not used for Gmail track
+	emailRepo := repository.NewEmailRepository(mongodb.Database)
 
 	// Initialize services
 	gmailService := services.NewGmailService(cfg)
+	// Summary service: read API key/provider from env (empty -> local extractor)
+	summaryService := services.NewSummaryService(emailRepo, os.Getenv("LLM_API_KEY"), os.Getenv("LLM_PROVIDER"))
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(cfg, userRepo)
 	emailHandler := handlers.NewEmailHandler(gmailService, userRepo)
+	kanbanHandler := handlers.NewKanbanHandler(emailRepo, summaryService)
 
 	// Initialize Gin
 	r := gin.Default()
@@ -97,6 +104,12 @@ func main() {
 		protected.POST("/emails/send", emailHandler.SendEmail)
 		protected.POST("/emails/:emailId/modify", emailHandler.ModifyEmail)
 		protected.GET("/attachments/:id", emailHandler.GetAttachment)
+
+		// Kanban routes
+		protected.GET("/kanban", kanbanHandler.GetKanban)
+		protected.POST("/kanban/move", kanbanHandler.Move)
+		protected.POST("/kanban/snooze", kanbanHandler.Snooze)
+		protected.POST("/kanban/summarize", kanbanHandler.Summarize)
 	}
 
 	// Swagger route
@@ -105,6 +118,24 @@ func main() {
 	// Start server
 	log.Printf("Server starting on port %s", cfg.Port)
 	log.Printf("Connected to MongoDB: %s", cfg.MongoDBDatabase)
+	// Start snooze worker (runs in background)
+	go func() {
+		interval := time.Minute
+		ticker := time.NewTicker(interval)
+		for range ticker.C {
+			now := time.Now()
+			due, err := emailRepo.ListSnoozedDue(context.Background(), now)
+			if err != nil {
+				log.Println("snooze worker: error listing due emails:", err)
+				continue
+			}
+			for _, e := range due {
+				if err := emailRepo.UpdateStatus(context.Background(), e.ID, string(models.StatusInbox)); err != nil {
+					log.Println("snooze worker: failed to restore email:", e.ID, err)
+				}
+			}
+		}
+	}()
 
 	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatal("Failed to start server:", err)
