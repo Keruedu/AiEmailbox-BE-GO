@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -449,17 +450,72 @@ func (s *GmailService) SearchEmails(ctx context.Context, user *models.User, quer
 		go func(idx int, id string) {
 			defer func() { <-sem }() // Release token
 
-			// Use 'metadata' format to fetch headers and snippet only.
-			// This avoids downloading body/attachments, significantly improving speed.
-			msg, err := srv.Users.Messages.Get("me", id).Format("metadata").Do()
+			msg, err := srv.Users.Messages.Get("me", id).Format("full").Do()
 			if err != nil {
 				resultsChan <- result{index: idx, err: err}
 				return
 			}
 
 			email := s.mapGmailMessageToEmail(msg)
-			// msg.Snippet is automatically populated by Google and mapped to email.Preview
-			// No need for custom body slicing.
+
+			// Generate contextual snippet
+			if query != "" {
+				// We need to work with runes to ensure we don't break multi-byte characters when slicing
+				// This is especially important for Vietnamese or other UTF-8 content
+				runeBody := []rune(email.Body)
+				lowerBody := strings.ToLower(email.Body)
+				lowerQuery := strings.ToLower(query)
+
+				// Find match in bytes
+				byteIdx := strings.Index(lowerBody, lowerQuery)
+
+				// Fallback to fuzzy
+				if byteIdx == -1 {
+					cleanBody, _, _ := transform.String(t, lowerBody)
+					cleanQuery, _, _ := transform.String(t, lowerQuery)
+					if cleanIdx := strings.Index(cleanBody, cleanQuery); cleanIdx != -1 {
+						byteIdx = cleanIdx
+						if byteIdx >= len(lowerBody) {
+							byteIdx = 0
+						}
+					}
+				}
+
+				if byteIdx != -1 {
+					if byteIdx > len(email.Body) {
+						byteIdx = len(email.Body)
+					}
+
+					safePrefix := email.Body[:byteIdx]
+					runeIdx := utf8.RuneCountInString(safePrefix)
+					queryLenRunes := utf8.RuneCountInString(query)
+
+					const contextLen = 60
+					start := runeIdx - contextLen
+					if start < 0 {
+						start = 0
+					}
+
+					end := runeIdx + queryLenRunes + contextLen
+					if end > len(runeBody) {
+						end = len(runeBody)
+					}
+
+					if start > end {
+						start = end
+					}
+
+					snippet := string(runeBody[start:end])
+
+					if start > 0 {
+						snippet = "..." + snippet
+					}
+					if end < len(runeBody) {
+						snippet = snippet + "..."
+					}
+					email.Preview = snippet
+				}
+			}
 
 			resultsChan <- result{index: idx, email: &email}
 		}(i, msgHeader.Id)
