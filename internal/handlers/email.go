@@ -260,6 +260,15 @@ func (h *EmailHandler) SearchEmails(c *gin.Context) {
 			matches := fuzzy.FindFrom(query, src)
 
 			for _, match := range matches {
+				// Debug logging to help tune threshold
+				// fmt.Printf("Query: %s, Match: %s, Score: %d\n", query, searchableItems[match.Index].SearchText, match.Score)
+
+				// Threshold: Match score must be at least the query length.
+				// This filters out very weak/scattered matches.
+				if match.Score < len(query) {
+					continue
+				}
+
 				if match.Index < len(searchableItems) {
 					email := searchableItems[match.Index].Original
 					emailMap[email.ID] = *email
