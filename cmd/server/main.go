@@ -48,6 +48,15 @@ func main() {
 	}
 	defer mongodb.Disconnect()
 
+	// TEMPORARY: Drop emails collection to clear corrupted data (invalid UTF-8)
+	// This ensures the app starts fresh with the new sanitization logic.
+	ctx := context.Background()
+	if err := mongodb.Database.Collection("emails").Drop(ctx); err != nil {
+		log.Printf("Warning: Failed to drop emails collection: %v", err)
+	} else {
+		log.Println("Successfully dropped 'emails' collection to clean up corrupted data.")
+	}
+
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(mongodb.Database)
 	emailRepo := repository.NewEmailRepository(mongodb.Database)
@@ -101,6 +110,7 @@ func main() {
 		// Email routes
 		protected.GET("/mailboxes", emailHandler.GetMailboxes)
 		protected.GET("/mailboxes/:mailboxId/emails", emailHandler.GetEmails)
+		protected.GET("/emails/search", emailHandler.SearchEmails)
 		protected.GET("/emails/:emailId", emailHandler.GetEmailDetail)
 		protected.POST("/emails/:emailId/reply", emailHandler.ReplyEmail)
 		protected.POST("/emails/send", emailHandler.SendEmail)

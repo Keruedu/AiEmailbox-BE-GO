@@ -2,6 +2,7 @@ package repository
 
 import (
 	"aiemailbox-be/internal/models"
+	"aiemailbox-be/internal/utils"
 	"context"
 	"time"
 
@@ -81,6 +82,44 @@ func (r *EmailRepository) GetKanban(ctx context.Context, userID string) (map[str
 		return nil, err
 	}
 	return result, nil
+}
+
+// SearchEmails searches for emails matching the query string in subject, sender, or summary.
+func (r *EmailRepository) SearchEmails(ctx context.Context, userID string, query string) ([]models.Email, error) {
+	// Fuzzy search using regex with case insensitivity
+	// We search in: subject, from.name, from.email, summary, body
+	// Use relaxed regex for accent insensitivity
+	pattern := utils.GenerateRelaxedRegex(query)
+	regex := bson.M{"$regex": pattern, "$options": "i"}
+	filter := bson.M{
+		"userId": userID,
+		"$or": []bson.M{
+			{"subject": regex},
+			{"from.name": regex},
+			{"from.email": regex},
+			{"summary": regex},
+			{"body": regex},
+		},
+		"labels":    bson.M{"$ne": "TRASH"},
+		"mailboxId": bson.M{"$ne": "TRASH"},
+	}
+
+	findOptions := options.Find()
+	findOptions.SetSort(bson.D{{Key: "receivedAt", Value: -1}})
+	findOptions.SetLimit(50) // Limit results for performance
+
+	cursor, err := r.emailCollection.Find(ctx, filter, findOptions)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var emails []models.Email
+	if err = cursor.All(ctx, &emails); err != nil {
+		return nil, err
+	}
+
+	return emails, nil
 }
 
 // UpdateStatus updates the workflow status for an email

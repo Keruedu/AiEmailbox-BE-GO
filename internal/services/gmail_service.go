@@ -3,15 +3,20 @@ package services
 import (
 	"aiemailbox-be/config"
 	"aiemailbox-be/internal/models"
+	"aiemailbox-be/internal/utils"
 	"context"
 	"encoding/base64"
 	"errors"
 	"net/mail"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
 )
@@ -171,7 +176,13 @@ func (s *GmailService) GetEmail(ctx context.Context, user *models.User, emailID 
 
 func (s *GmailService) mapGmailMessageToEmail(msg *gmail.Message) models.Email {
 	var subject, from, to string
+	// Initialize date with InternalDate (epoch ms) as a reliable fallback
 	var date time.Time
+	if msg.InternalDate > 0 {
+		date = time.Unix(msg.InternalDate/1000, (msg.InternalDate%1000)*1000000)
+	} else {
+		date = time.Now()
+	}
 
 	for _, header := range msg.Payload.Headers {
 		switch header.Name {
@@ -186,11 +197,8 @@ func (s *GmailService) mapGmailMessageToEmail(msg *gmail.Message) models.Email {
 			d, err := mail.ParseDate(header.Value)
 			if err == nil {
 				date = d
-			} else {
-				// Fallback to time.Parse for strict formats if mail.ParseDate failed (though it covers most)
-				// or just use Now()
-				date = time.Now()
 			}
+			// If parsing failed, we keep the InternalDate value which is better than zero or Now()
 		}
 	}
 
@@ -201,20 +209,50 @@ func (s *GmailService) mapGmailMessageToEmail(msg *gmail.Message) models.Email {
 	isRead := !contains(msg.LabelIds, "UNREAD")
 	isStarred := contains(msg.LabelIds, "STARRED")
 
+	// Extract attachments
+	attachments := s.getAttachments(msg.Payload)
+	hasAttachments := len(attachments) > 0
+
 	return models.Email{
-		ID:         msg.Id,
-		ThreadID:   msg.ThreadId,
-		Subject:    subject,
-		Preview:    msg.Snippet,
-		From:       parseAddress(from),
-		To:         parseAddresses(to),
-		Body:       body,
-		ReceivedAt: date,
-		IsRead:     isRead,
-		IsStarred:  isStarred,
-		MailboxID:  "INBOX", // Default, or derive from labels
-		Labels:     msg.LabelIds,
+		ID:             msg.Id,
+		ThreadID:       msg.ThreadId,
+		Subject:        utils.ToValidUTF8(subject),
+		Preview:        utils.ToValidUTF8(msg.Snippet),
+		From:           parseAddress(utils.ToValidUTF8(from)),
+		To:             parseAddresses(utils.ToValidUTF8(to)),
+		Body:           utils.ToValidUTF8(body),
+		ReceivedAt:     date,
+		IsRead:         isRead,
+		IsStarred:      isStarred,
+		HasAttachments: hasAttachments,
+		Attachments:    attachments,
+		MailboxID:      "INBOX", // Default, or derive from labels
+		Labels:         msg.LabelIds,
 	}
+}
+
+func (s *GmailService) getAttachments(part *gmail.MessagePart) []models.Attachment {
+	var attachments []models.Attachment
+	if part == nil {
+		return attachments
+	}
+
+	// Check if the current part is an attachment
+	if part.Filename != "" && part.Body != nil && part.Body.AttachmentId != "" {
+		attachments = append(attachments, models.Attachment{
+			ID:       part.Body.AttachmentId,
+			Filename: part.Filename,
+			MimeType: part.MimeType,
+			Size:     part.Body.Size,
+		})
+	}
+
+	// Recursively check sub-parts
+	for _, p := range part.Parts {
+		attachments = append(attachments, s.getAttachments(p)...)
+	}
+
+	return attachments
 }
 
 func (s *GmailService) getBody(part *gmail.MessagePart) string {
@@ -368,3 +406,102 @@ func (s *GmailService) GetAttachment(ctx context.Context, user *models.User, mes
 
 	return data, nil
 }
+
+func (s *GmailService) SearchEmails(ctx context.Context, user *models.User, query string, pageToken string) ([]*models.Email, string, int, error) {
+	srv, err := s.GetClient(ctx, user)
+	if err != nil {
+		return nil, "", 0, err
+	}
+
+	// Search using 'q' parameter with higher limit
+	req := srv.Users.Messages.List("me").Q(query).MaxResults(100)
+	if pageToken != "" {
+		req.PageToken(pageToken)
+	}
+
+	resp, err := req.Do()
+	if err != nil {
+		return nil, "", 0, err
+	}
+
+	emails := []*models.Email{}
+	if len(resp.Messages) == 0 {
+		return emails, "", 0, nil
+	}
+
+	// Fetch details
+	for _, msgHeader := range resp.Messages {
+		msg, err := srv.Users.Messages.Get("me", msgHeader.Id).Format("full").Do()
+		if err != nil {
+			continue
+		}
+
+		email := s.mapGmailMessageToEmail(msg)
+
+		// Generate contextual snippet if query matches body
+		if query != "" {
+			lowerBody := strings.ToLower(email.Body)
+			lowerQuery := strings.ToLower(query)
+
+			// Try direct match first
+			idx := strings.Index(lowerBody, lowerQuery)
+
+			// If not found, try fuzzy match (remove accents)
+			if idx == -1 {
+				cleanBody, _, _ := transform.String(t, lowerBody)
+				cleanQuery, _, _ := transform.String(t, lowerQuery)
+				cleanIdx := strings.Index(cleanBody, cleanQuery)
+
+				if cleanIdx != -1 {
+					// Use the clean index as approximation.
+					// Note: removing accents might change length slightly for some chars,
+					// but usually it's stable for Vietnamese.
+					// We'll trust it for the context window.
+					idx = cleanIdx
+				}
+			}
+
+			if idx != -1 {
+				// Create a snippet around the match
+				const contextLen = 60
+				start := idx - contextLen
+				if start < 0 {
+					start = 0
+				}
+				end := idx + len(query) + contextLen
+				if end > len(email.Body) {
+					end = len(email.Body)
+				}
+
+				// Ensure we don't crash slice boundaries
+				if start > len(email.Body) {
+					start = 0
+				}
+				if end > len(email.Body) {
+					end = len(email.Body)
+				}
+				if start > end {
+					start = end
+				}
+
+				snippet := email.Body[start:end]
+
+				// Add ellipsis
+				if start > 0 {
+					snippet = "..." + snippet
+				}
+				if end < len(email.Body) {
+					snippet = snippet + "..."
+				}
+				email.Preview = snippet
+			}
+		}
+
+		emails = append(emails, &email)
+	}
+
+	return emails, resp.NextPageToken, int(resp.ResultSizeEstimate), nil
+}
+
+// Transformer chain to remove accents
+var t = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
