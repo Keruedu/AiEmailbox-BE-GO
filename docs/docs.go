@@ -75,6 +75,181 @@ const docTemplate = `{
                 }
             }
         },
+        "/kanban": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Return kanban columns with cards",
+                "tags": [
+                    "kanban"
+                ],
+                "summary": "Get Kanban board",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/definitions/handlers.Card"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/kanban/move": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "tags": [
+                    "kanban"
+                ],
+                "summary": "Move a card to another column",
+                "parameters": [
+                    {
+                        "description": "Move payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MoveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/kanban/snooze": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "tags": [
+                    "kanban"
+                ],
+                "summary": "Snooze a card until a given time",
+                "parameters": [
+                    {
+                        "description": "Snooze payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SnoozeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/kanban/summarize": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "tags": [
+                    "kanban"
+                ],
+                "summary": "Generate summary for an email",
+                "parameters": [
+                    {
+                        "description": "Summarize payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SummarizeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/mailboxes": {
             "get": {
                 "security": [
@@ -172,6 +347,71 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "handlers.Card": {
+            "type": "object",
+            "properties": {
+                "gmail_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "sender": {
+                    "type": "string"
+                },
+                "snoozed_until": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.MoveRequest": {
+            "type": "object",
+            "required": [
+                "email_id",
+                "to_status"
+            ],
+            "properties": {
+                "email_id": {
+                    "type": "string"
+                },
+                "to_status": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.SnoozeRequest": {
+            "type": "object",
+            "required": [
+                "email_id",
+                "until"
+            ],
+            "properties": {
+                "email_id": {
+                    "type": "string"
+                },
+                "until": {
+                    "description": "RFC3339",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.SummarizeRequest": {
+            "type": "object",
+            "required": [
+                "email_id"
+            ],
+            "properties": {
+                "email_id": {
+                    "type": "string"
+                }
+            }
+        },
         "models.Attachment": {
             "type": "object",
             "properties": {
@@ -222,6 +462,9 @@ const docTemplate = `{
                 "from": {
                     "$ref": "#/definitions/models.EmailAddress"
                 },
+                "gmailUrl": {
+                    "type": "string"
+                },
                 "hasAttachments": {
                     "type": "boolean"
                 },
@@ -250,7 +493,21 @@ const docTemplate = `{
                 "receivedAt": {
                     "type": "string"
                 },
+                "snoozedUntil": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "Workflow fields for Kanban",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.EmailStatus"
+                        }
+                    ]
+                },
                 "subject": {
+                    "type": "string"
+                },
+                "summary": {
                     "type": "string"
                 },
                 "threadId": {
@@ -300,6 +557,23 @@ const docTemplate = `{
                     "type": "integer"
                 }
             }
+        },
+        "models.EmailStatus": {
+            "type": "string",
+            "enum": [
+                "inbox",
+                "todo",
+                "in_progress",
+                "done",
+                "snoozed"
+            ],
+            "x-enum-varnames": [
+                "StatusInbox",
+                "StatusTodo",
+                "StatusInProgress",
+                "StatusDone",
+                "StatusSnoozed"
+            ]
         },
         "models.ErrorResponse": {
             "type": "object",

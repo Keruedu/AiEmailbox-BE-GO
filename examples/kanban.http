@@ -1,0 +1,54 @@
+### Kanban API examples
+
+# Replace <TOKEN> with a valid access token
+
+### Get column metadata (ordered keys/labels)
+GET http://localhost:8080/api/kanban/meta
+Authorization: Bearer <TOKEN>
+
+### Get Kanban board (columns map)
+GET http://localhost:8080/api/kanban
+Authorization: Bearer <TOKEN>
+
+# Example response (200)
+# {
+#   "columns": {
+#     "inbox": [ { "id":"abc","sender":"Alice","subject":"Meeting","summary":"Short summary...","gmail_url":"https://...","snoozed_until":null } ],
+#     "todo": [],
+#     "in_progress": [],
+#     "done": [],
+#     "snoozed": []
+#   }
+# }
+
+### Move a card
+POST http://localhost:8080/api/kanban/move
+Content-Type: application/json
+Authorization: Bearer <TOKEN>
+
+{
+  "email_id": "<EMAIL_ID>",
+  "to_status": "done"
+}
+
+### Snooze a card
+POST http://localhost:8080/api/kanban/snooze
+Content-Type: application/json
+Authorization: Bearer <TOKEN>
+
+{
+  "email_id": "<EMAIL_ID>",
+  "until": "2025-12-10T15:00:00Z"
+}
+
+### Request a summary for a card
+POST http://localhost:8080/api/kanban/summarize
+Content-Type: application/json
+Authorization: Bearer <TOKEN>
+
+{
+  "email_id": "<EMAIL_ID>"
+}
+
+# Example response (200)
+# { "ok": true, "summary": "Generated summary..." }

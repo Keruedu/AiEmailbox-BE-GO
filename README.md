@@ -184,6 +184,66 @@ GET /api/emails/:emailId
 Authorization: Bearer <access-token>
 ```
 
+### Kanban / AI Summary (Protected)
+
+The backend exposes Kanban endpoints for the UI to render columns and cards, move cards, snooze, and request summaries.
+
+#### Get Kanban Board
+```http
+GET /api/kanban
+Authorization: Bearer <access-token>
+```
+Response (200):
+```json
+{
+  "columns": {
+    "inbox": [
+      {"id":"abc","sender":"Alice","subject":"Meeting","summary":"Short summary...","gmail_url":"https://...","snoozed_until":null}
+    ],
+    "todo": [],
+    "done": []
+  }
+}
+```
+
+#### Move Card
+```http
+POST /api/kanban/move
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+{ "email_id": "abc", "to_status": "done" }
+```
+Response (200): `{ "ok": true }`
+
+#### Snooze Card
+```http
+POST /api/kanban/snooze
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+{ "email_id": "abc", "until": "2025-12-10T15:00:00Z" }
+```
+Response (200): `{ "ok": true }`
+
+#### Request Summary
+```http
+POST /api/kanban/summarize
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+{ "email_id": "abc" }
+```
+Response (200): `{ "ok": true, "summary": "Generated summary..." }`
+
+Notes:
+- All Kanban endpoints are protected (require a valid access token).
+- `GET /api/kanban/meta` is available and returns ordered column metadata for the frontend: `{ "columns": [ { "key": "inbox", "label": "Inbox" }, ... ] }`. Use `key` to match the `columns` object returned by `GET /api/kanban`.
+- `GET /api/kanban` includes emails with status `snoozed` so the frontend can optionally render a `Snoozed` column. Each card's `snoozed_until` indicates the RFC3339 time when the background worker will restore the email to active workflow.
+- Summaries are generated dynamically from the email content. By default the server uses a local extractive summarizer (no API key required). If `LLM_API_KEY` is provided and `LLM_PROVIDER` set (e.g. `openai`), the service will attempt to call the provider for higher-quality summaries. Be mindful of rate limits and cost when enabling provider-based summarization.
+- Example requests for the frontend are provided in `examples/kanban.http` (includes `GET /api/kanban/meta`, `GET /api/kanban`, and example `POST` payloads for move/snooze/summarize).
+
+
 ## Authentication Flow
 
 1. **Login/Signup**: User provides credentials → Server returns access token (15min) and refresh token (7 days)
@@ -306,6 +366,32 @@ GOOGLE_CLIENT_ID=<your-google-oauth-client-id>
 GOOGLE_CLIENT_SECRET=<your-google-oauth-secret>
 FRONTEND_URL=<your-frontend-url>
 ```
+
+### GA05 / Kanban feature env vars
+
+These additional env vars are used by the Kanban and summary features:
+
+```
+LLM_API_KEY=         # optional: API key for external LLM provider (leave empty to use local summarizer)
+LLM_PROVIDER=openai  # optional: provider name (e.g. openai)
+SNOOZE_CHECK_INTERVAL=1m  # interval for worker to check and restore snoozed emails (Go duration)
+KANBAN_COLUMNS=Inbox,To Do,In Progress,Done,Snoozed  # CSV list of columns
+```
+
+Place these in your `.env` or platform environment configuration. See `.env.example` for samples.
+
+### Local vs Provider Summary Service
+
+- Local extractor (default, free): no API key required. The server uses a simple extractive summarizer (sentence scoring) to produce dynamic summaries from the email body. Recommended for development and grading.
+- Provider (optional, paid): set `LLM_API_KEY` and `LLM_PROVIDER=openai` to enable calling OpenAI's Chat Completions. This yields higher-quality summaries but may incur API costs.
+
+Example: enable OpenAI (only for demo/production):
+
+```bash
+export LLM_API_KEY="sk-..."
+export LLM_PROVIDER="openai"
+```
+
 
 ## Testing
 

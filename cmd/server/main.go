@@ -21,7 +21,13 @@ import (
 	"aiemailbox-be/internal/middleware"
 	"aiemailbox-be/internal/repository"
 	"aiemailbox-be/internal/services"
+	"context"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -44,14 +50,17 @@ func main() {
 
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(mongodb.Database)
-	// emailRepo := repository.NewEmailRepository(mongodb.Database) // Not used for Gmail track
+	emailRepo := repository.NewEmailRepository(mongodb.Database)
 
 	// Initialize services
 	gmailService := services.NewGmailService(cfg)
+	// Summary service: read API key/provider from config (empty -> local extractor)
+	summaryService := services.NewSummaryService(emailRepo, cfg.LLMApiKey, cfg.LLMProvider)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(cfg, userRepo)
-	emailHandler := handlers.NewEmailHandler(gmailService, userRepo)
+	emailHandler := handlers.NewEmailHandler(gmailService, userRepo, emailRepo)
+	kanbanHandler := handlers.NewKanbanHandler(emailRepo, summaryService, cfg)
 
 	// Initialize Gin
 	r := gin.Default()
@@ -97,6 +106,13 @@ func main() {
 		protected.POST("/emails/send", emailHandler.SendEmail)
 		protected.POST("/emails/:emailId/modify", emailHandler.ModifyEmail)
 		protected.GET("/attachments/:id", emailHandler.GetAttachment)
+
+		// Kanban routes
+		protected.GET("/kanban", kanbanHandler.GetKanban)
+		protected.GET("/kanban/meta", kanbanHandler.Meta)
+		protected.POST("/kanban/move", kanbanHandler.Move)
+		protected.POST("/kanban/snooze", kanbanHandler.Snooze)
+		protected.POST("/kanban/summarize", kanbanHandler.Summarize)
 	}
 
 	// Swagger route
@@ -105,8 +121,38 @@ func main() {
 	// Start server
 	log.Printf("Server starting on port %s", cfg.Port)
 	log.Printf("Connected to MongoDB: %s", cfg.MongoDBDatabase)
+	// Start snooze worker (runs in background) with configurable interval via SNOOZE_CHECK_INTERVAL
+	workerCtx, workerCancel := context.WithCancel(context.Background())
 
-	if err := r.Run(":" + cfg.Port); err != nil {
-		log.Fatal("Failed to start server:", err)
+	interval := cfg.SnoozeCheckInterval
+	services.StartSnoozeWorker(workerCtx, interval, emailRepo)
+
+	srv := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: r,
 	}
+
+	// Start server in goroutine
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown the server with
+	// a timeout of 10 seconds.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	// stop worker
+	workerCancel()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
+	}
+	log.Println("Server exiting")
 }
