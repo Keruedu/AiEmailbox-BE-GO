@@ -7,10 +7,12 @@ import (
 	"aiemailbox-be/internal/utils"
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sahilm/fuzzy"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -236,36 +238,31 @@ func (h *EmailHandler) SearchEmails(c *gin.Context) {
 		// Fetch all local emails (excluding trash, via GetKanban)
 		kanbanMap, err := h.emailRepo.GetKanban(ctx, user.ID.Hex())
 		if err == nil {
-			const fuzzyThreshold = 3 // Distance threshold
+			// Pre-process candidates for fuzzy search (Sanitize HTML once)
+
+			var searchableItems []SearchableEmail
 			for _, list := range kanbanMap {
-				for _, e := range list {
-					// Normalize for fuzzy check
-					normQuery := utils.RemoveAccents(query)
-					normSubject := utils.RemoveAccents(e.Subject)
+				for i := range list {
+					// Use pointer to avoid copying big structs
+					e := &list[i]
+					// Combine fields and sanitize
+					rawText := e.Subject + " " + e.From.Name + " " + e.From.Email + " " + e.Body
+					cleanText := utils.SanitizeHTML(rawText)
+					searchableItems = append(searchableItems, SearchableEmail{
+						Original:   e,
+						SearchText: cleanText,
+					})
+				}
+			}
 
-					// Simple optimization: check length diff first
-					if abs(len(normSubject)-len(normQuery)) > fuzzyThreshold {
-						// Check summary next
-					} else {
-						distSub := utils.Levenshtein(normQuery, normSubject)
-						if distSub <= fuzzyThreshold {
-							emailMap[e.ID] = e
-							continue
-						}
-					}
+			// Use sahilm/fuzzy for search
+			src := &EmailSource{items: searchableItems}
+			matches := fuzzy.FindFrom(query, src)
 
-					// Also check summary if exists
-					if e.Summary != "" {
-						normSummary := utils.RemoveAccents(e.Summary)
-						if abs(len(normSummary)-len(normQuery)) > fuzzyThreshold {
-							continue
-						}
-						distSum := utils.Levenshtein(normQuery, normSummary)
-						if distSum <= fuzzyThreshold {
-							emailMap[e.ID] = e
-							continue
-						}
-					}
+			for _, match := range matches {
+				if match.Index < len(searchableItems) {
+					email := searchableItems[match.Index].Original
+					emailMap[email.ID] = *email
 				}
 			}
 		}
@@ -275,6 +272,12 @@ func (h *EmailHandler) SearchEmails(c *gin.Context) {
 	finalEmails := make([]*models.Email, 0, len(emailMap))
 	for _, e := range emailMap {
 		val := e // copy
+		// Sanitize Preview and Summary for display
+		val.Preview = utils.SanitizeHTML(val.Preview)
+		val.Summary = utils.SanitizeHTML(val.Summary)
+		// Clear body to reduce payload and force detail fetch (which ensures full content is loaded on click)
+		val.Body = ""
+
 		finalEmails = append(finalEmails, &val)
 	}
 
@@ -300,6 +303,18 @@ func (h *EmailHandler) SearchEmails(c *gin.Context) {
 		}(gmailEmails)
 	}
 
+	// Sort by ReceivedAt descending (newest first)
+	sort.Slice(finalEmails, func(i, j int) bool {
+		// Newest first means i > j (i is 'after' j)
+		return finalEmails[i].ReceivedAt.After(finalEmails[j].ReceivedAt)
+	})
+
+	// Sort by ReceivedAt descending (newest first)
+	sort.Slice(finalEmails, func(i, j int) bool {
+		// Newest first means i > j (i is 'after' j)
+		return finalEmails[i].ReceivedAt.After(finalEmails[j].ReceivedAt)
+	})
+
 	// Calculate total estimate (max of Gmail estimate or actual count)
 	totalEstimate := estimate
 	if len(finalEmails) > totalEstimate {
@@ -311,6 +326,24 @@ func (h *EmailHandler) SearchEmails(c *gin.Context) {
 		"nextPageToken": nextPageToken,
 		"totalEstimate": totalEstimate,
 	})
+}
+
+// Helper for fuzzy search
+type SearchableEmail struct {
+	Original   *models.Email
+	SearchText string
+}
+
+type EmailSource struct {
+	items []SearchableEmail
+}
+
+func (s *EmailSource) String(i int) string {
+	return s.items[i].SearchText
+}
+
+func (s *EmailSource) Len() int {
+	return len(s.items)
 }
 
 func abs(x int) int {

@@ -1,41 +1,35 @@
 package utils
 
-import "strings"
+import (
+	"html"
+	"regexp"
+	"strings"
 
-// Levenshtein calculates the Levenshtein distance between two strings
-func Levenshtein(s1, s2 string) int {
-	s1 = strings.ToLower(s1)
-	s2 = strings.ToLower(s2)
-	r1, r2 := []rune(s1), []rune(s2)
-	n, m := len(r1), len(r2)
+	"github.com/microcosm-cc/bluemonday"
+)
 
-	if n == 0 {
-		return m
-	}
-	if m == 0 {
-		return n
-	}
+// SanitizeHTML strips HTML tags, script/style content, and decodes entities
+func SanitizeHTML(s string) string {
+	// 1. Decode HTML entities first (e.g. &lt; -> <) so tags are recognized
+	s = html.UnescapeString(s)
 
-	row := make([]int, m+1)
-	for i := 0; i <= m; i++ {
-		row[i] = i
-	}
+	// 2. Remove script and style blocks content
+	reScript := regexp.MustCompile(`(?i)<script[^>]*>[\s\S]*?</script>`)
+	s = reScript.ReplaceAllString(s, "")
+	reStyle := regexp.MustCompile(`(?i)<style[^>]*>[\s\S]*?</style>`)
+	s = reStyle.ReplaceAllString(s, "")
 
-	for i := 1; i <= n; i++ {
-		prev := i
-		var val int
-		for j := 1; j <= m; j++ {
-			if r1[i-1] == r2[j-1] {
-				val = row[j-1]
-			} else {
-				val = min(min(row[j-1]+1, prev+1), row[j]+1)
-			}
-			row[j-1] = prev
-			prev = val
-		}
-		row[m] = prev
-	}
-	return row[m]
+	// 3. Strip tags using bluemonday
+	p := bluemonday.StripTagsPolicy()
+	s = p.Sanitize(s)
+
+	// 4. Decode HTML entities AGAIN (bluemonday might have escaped them, and we want plain text)
+	s = html.UnescapeString(s)
+
+	// 5. Collapse extra whitespace
+	s = strings.Join(strings.Fields(s), " ")
+
+	return s
 }
 
 func min(a, b int) int {
