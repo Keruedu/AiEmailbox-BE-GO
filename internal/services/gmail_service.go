@@ -413,8 +413,8 @@ func (s *GmailService) SearchEmails(ctx context.Context, user *models.User, quer
 		return nil, "", 0, err
 	}
 
-	// Search using 'q' parameter with higher limit
-	req := srv.Users.Messages.List("me").Q(query).MaxResults(100)
+	// Search using 'q' parameter with limit
+	req := srv.Users.Messages.List("me").Q(query).MaxResults(25)
 	if pageToken != "" {
 		req.PageToken(pageToken)
 	}
@@ -424,83 +424,64 @@ func (s *GmailService) SearchEmails(ctx context.Context, user *models.User, quer
 		return nil, "", 0, err
 	}
 
-	emails := []*models.Email{}
 	if len(resp.Messages) == 0 {
-		return emails, "", 0, nil
+		return []*models.Email{}, "", 0, nil
 	}
 
-	// Fetch details
-	for _, msgHeader := range resp.Messages {
-		msg, err := srv.Users.Messages.Get("me", msgHeader.Id).Format("full").Do()
-		if err != nil {
-			continue
-		}
+	// Prepare exact slice size
+	emails := make([]*models.Email, len(resp.Messages))
 
-		email := s.mapGmailMessageToEmail(msg)
+	// Use concurrency to fetch details
+	// Limit concurrency to avoid rate limits
+	const maxConcurrency = 10
+	sem := make(chan struct{}, maxConcurrency)
 
-		// Generate contextual snippet if query matches body
-		if query != "" {
-			lowerBody := strings.ToLower(email.Body)
-			lowerQuery := strings.ToLower(query)
-
-			// Try direct match first
-			idx := strings.Index(lowerBody, lowerQuery)
-
-			// If not found, try fuzzy match (remove accents)
-			if idx == -1 {
-				cleanBody, _, _ := transform.String(t, lowerBody)
-				cleanQuery, _, _ := transform.String(t, lowerQuery)
-				cleanIdx := strings.Index(cleanBody, cleanQuery)
-
-				if cleanIdx != -1 {
-					// Use the clean index as approximation.
-					// Note: removing accents might change length slightly for some chars,
-					// but usually it's stable for Vietnamese.
-					// We'll trust it for the context window.
-					idx = cleanIdx
-				}
-			}
-
-			if idx != -1 {
-				// Create a snippet around the match
-				const contextLen = 60
-				start := idx - contextLen
-				if start < 0 {
-					start = 0
-				}
-				end := idx + len(query) + contextLen
-				if end > len(email.Body) {
-					end = len(email.Body)
-				}
-
-				// Ensure we don't crash slice boundaries
-				if start > len(email.Body) {
-					start = 0
-				}
-				if end > len(email.Body) {
-					end = len(email.Body)
-				}
-				if start > end {
-					start = end
-				}
-
-				snippet := email.Body[start:end]
-
-				// Add ellipsis
-				if start > 0 {
-					snippet = "..." + snippet
-				}
-				if end < len(email.Body) {
-					snippet = snippet + "..."
-				}
-				email.Preview = snippet
-			}
-		}
-
-		emails = append(emails, &email)
+	type result struct {
+		index int
+		email *models.Email
+		err   error
 	}
 
-	return emails, resp.NextPageToken, int(resp.ResultSizeEstimate), nil
+	resultsChan := make(chan result, len(resp.Messages))
+
+	for i, msgHeader := range resp.Messages {
+		sem <- struct{}{} // Acquire token
+		go func(idx int, id string) {
+			defer func() { <-sem }() // Release token
+
+			// Use 'metadata' format to fetch headers and snippet only.
+			// This avoids downloading body/attachments, significantly improving speed.
+			msg, err := srv.Users.Messages.Get("me", id).Format("metadata").Do()
+			if err != nil {
+				resultsChan <- result{index: idx, err: err}
+				return
+			}
+
+			email := s.mapGmailMessageToEmail(msg)
+			// msg.Snippet is automatically populated by Google and mapped to email.Preview
+			// No need for custom body slicing.
+
+			resultsChan <- result{index: idx, email: &email}
+		}(i, msgHeader.Id)
+	}
+
+	// Collect results
+	for i := 0; i < len(resp.Messages); i++ {
+		res := <-resultsChan
+		if res.err == nil && res.email != nil {
+			emails[res.index] = res.email
+		}
+	}
+
+	// Filter out nils (errors)
+	validEmails := []*models.Email{}
+	for _, e := range emails {
+		if e != nil {
+			validEmails = append(validEmails, e)
+		}
+	}
+
+	return validEmails, resp.NextPageToken, int(resp.ResultSizeEstimate), nil
 }
 
 // Transformer chain to remove accents
