@@ -4,6 +4,7 @@ import (
 	"aiemailbox-be/internal/models"
 	"aiemailbox-be/internal/utils"
 	"context"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -277,4 +278,180 @@ func (r *EmailRepository) UpsertEmail(ctx context.Context, email *models.Email) 
 	opts := options.Update().SetUpsert(true)
 	_, err := r.emailCollection.UpdateOne(ctx, filter, update, opts)
 	return err
+}
+
+// ======== Week 4: Semantic Search Methods ========
+
+// SetEmbedding stores the vector embedding for an email
+func (r *EmailRepository) SetEmbedding(ctx context.Context, emailID string, embedding []float32) error {
+	filter := idFilter(emailID)
+	update := bson.M{"$set": bson.M{"embedding": embedding}}
+	_, err := r.emailCollection.UpdateOne(ctx, filter, update)
+	return err
+}
+
+// GetAllWithEmbeddings returns all emails for a user that have embeddings stored
+func (r *EmailRepository) GetAllWithEmbeddings(ctx context.Context, userID string) ([]models.Email, error) {
+	filter := bson.M{
+		"userId":    userID,
+		"embedding": bson.M{"$exists": true, "$ne": nil},
+		"labels":    bson.M{"$ne": "TRASH"},
+		"mailboxId": bson.M{"$ne": "TRASH"},
+	}
+
+	findOptions := options.Find()
+	findOptions.SetSort(bson.D{{Key: "receivedAt", Value: -1}})
+
+	cursor, err := r.emailCollection.Find(ctx, filter, findOptions)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var emails []models.Email
+	if err = cursor.All(ctx, &emails); err != nil {
+		return nil, err
+	}
+
+	return emails, nil
+}
+
+// GetEmailsWithoutEmbedding returns emails that don't have embeddings yet
+func (r *EmailRepository) GetEmailsWithoutEmbedding(ctx context.Context, userID string, limit int) ([]models.Email, error) {
+	filter := bson.M{
+		"userId": userID,
+		"$or": []bson.M{
+			{"embedding": bson.M{"$exists": false}},
+			{"embedding": nil},
+			{"embedding": bson.M{"$size": 0}},
+		},
+		"labels":    bson.M{"$ne": "TRASH"},
+		"mailboxId": bson.M{"$ne": "TRASH"},
+	}
+
+	findOptions := options.Find()
+	findOptions.SetLimit(int64(limit))
+	findOptions.SetSort(bson.D{{Key: "receivedAt", Value: -1}})
+
+	cursor, err := r.emailCollection.Find(ctx, filter, findOptions)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var emails []models.Email
+	if err = cursor.All(ctx, &emails); err != nil {
+		return nil, err
+	}
+
+	return emails, nil
+}
+
+// GetUniqueSenders returns unique sender names/emails for a user (for auto-suggestions)
+func (r *EmailRepository) GetUniqueSenders(ctx context.Context, userID string, query string, limit int) ([]string, error) {
+	pipeline := []bson.M{
+		{"$match": bson.M{
+			"userId":    userID,
+			"labels":    bson.M{"$ne": "TRASH"},
+			"mailboxId": bson.M{"$ne": "TRASH"},
+		}},
+		{"$group": bson.M{
+			"_id": bson.M{
+				"name":  "$from.name",
+				"email": "$from.email",
+			},
+		}},
+		{"$limit": 100},
+	}
+
+	cursor, err := r.emailCollection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var results []string
+	queryLower := strings.ToLower(query)
+	for cursor.Next(ctx) {
+		var doc struct {
+			ID struct {
+				Name  string `bson:"name"`
+				Email string `bson:"email"`
+			} `bson:"_id"`
+		}
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+
+		// Filter by query prefix
+		nameLower := strings.ToLower(doc.ID.Name)
+		emailLower := strings.ToLower(doc.ID.Email)
+		if strings.Contains(nameLower, queryLower) || strings.Contains(emailLower, queryLower) {
+			if doc.ID.Name != "" {
+				results = append(results, doc.ID.Name)
+			} else {
+				results = append(results, doc.ID.Email)
+			}
+		}
+
+		if len(results) >= limit {
+			break
+		}
+	}
+
+	return results, nil
+}
+
+// GetSubjectKeywords returns unique subject words for a user (for auto-suggestions)
+func (r *EmailRepository) GetSubjectKeywords(ctx context.Context, userID string, query string, limit int) ([]string, error) {
+	filter := bson.M{
+		"userId":    userID,
+		"labels":    bson.M{"$ne": "TRASH"},
+		"mailboxId": bson.M{"$ne": "TRASH"},
+	}
+
+	findOptions := options.Find()
+	findOptions.SetLimit(200)
+	findOptions.SetProjection(bson.M{"subject": 1})
+
+	cursor, err := r.emailCollection.Find(ctx, filter, findOptions)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	wordMap := make(map[string]bool)
+	queryLower := strings.ToLower(query)
+
+	for cursor.Next(ctx) {
+		var doc struct {
+			Subject string `bson:"subject"`
+		}
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+
+		// Extract words from subject
+		words := strings.Fields(doc.Subject)
+		for _, w := range words {
+			w = strings.Trim(w, ".,!?:;\"'()[]{}|")
+			if len(w) < 3 {
+				continue
+			}
+			wLower := strings.ToLower(w)
+			if strings.HasPrefix(wLower, queryLower) {
+				wordMap[w] = true
+			}
+		}
+	}
+
+	var results []string
+	for w := range wordMap {
+		results = append(results, w)
+		if len(results) >= limit {
+			break
+		}
+	}
+
+	return results, nil
 }

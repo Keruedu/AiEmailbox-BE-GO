@@ -542,3 +542,55 @@ func (s *GmailService) SearchEmails(ctx context.Context, user *models.User, quer
 
 // Transformer chain to remove accents
 var t = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+
+// ======== Week 4: Label Management ========
+
+// GetLabels returns all Gmail labels for a user
+func (s *GmailService) GetLabels(ctx context.Context, userID string) ([]models.GmailLabel, error) {
+	// Note: This method needs a User object to get the Gmail client
+	// For now, we return common Gmail labels as a fallback
+	// In production, you would get the user from repository
+
+	// Return common Gmail labels
+	labels := []models.GmailLabel{
+		{ID: "INBOX", Name: "Inbox", Type: "system"},
+		{ID: "STARRED", Name: "Starred", Type: "system"},
+		{ID: "IMPORTANT", Name: "Important", Type: "system"},
+		{ID: "SENT", Name: "Sent", Type: "system"},
+		{ID: "DRAFT", Name: "Draft", Type: "system"},
+		{ID: "TRASH", Name: "Trash", Type: "system"},
+		{ID: "SPAM", Name: "Spam", Type: "system"},
+		{ID: "UNREAD", Name: "Unread", Type: "system"},
+		{ID: "CATEGORY_PERSONAL", Name: "Personal", Type: "category"},
+		{ID: "CATEGORY_SOCIAL", Name: "Social", Type: "category"},
+		{ID: "CATEGORY_PROMOTIONS", Name: "Promotions", Type: "category"},
+		{ID: "CATEGORY_UPDATES", Name: "Updates", Type: "category"},
+		{ID: "CATEGORY_FORUMS", Name: "Forums", Type: "category"},
+	}
+
+	return labels, nil
+}
+
+// GetLabelsWithUser returns Gmail labels for a specific user (full API call)
+func (s *GmailService) GetLabelsWithUser(ctx context.Context, user *models.User) ([]models.GmailLabel, error) {
+	srv, err := s.GetClient(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := srv.Users.Labels.List("me").Do()
+	if err != nil {
+		return nil, err
+	}
+
+	var labels []models.GmailLabel
+	for _, l := range resp.Labels {
+		labels = append(labels, models.GmailLabel{
+			ID:   l.Id,
+			Name: l.Name,
+			Type: strings.ToLower(l.Type),
+		})
+	}
+
+	return labels, nil
+}

@@ -51,16 +51,24 @@ func main() {
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(mongodb.Database)
 	emailRepo := repository.NewEmailRepository(mongodb.Database)
+	// Week 4: Kanban config repository
+	kanbanConfigRepo := repository.NewKanbanConfigRepository(mongodb.Database)
 
 	// Initialize services
 	gmailService := services.NewGmailService(cfg)
-	// Summary service: read API key/provider from config (empty -> local extractor)
-	summaryService := services.NewSummaryService(emailRepo, cfg.LLMApiKey, cfg.LLMProvider)
+	// Summary service: read API key/provider/model from config (empty -> local extractor)
+	summaryService := services.NewSummaryService(emailRepo, cfg.LLMApiKey, cfg.LLMProvider, cfg.LLMModel)
+	// Week 4: Embedding service for semantic search
+	embeddingService := services.NewEmbeddingService(cfg)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(cfg, userRepo)
 	emailHandler := handlers.NewEmailHandler(gmailService, userRepo, emailRepo)
 	kanbanHandler := handlers.NewKanbanHandler(emailRepo, summaryService, cfg)
+	// Week 4: Search handler
+	searchHandler := handlers.NewSearchHandler(emailRepo, embeddingService, cfg)
+	// Week 4: Kanban config handler
+	kanbanConfigHandler := handlers.NewKanbanConfigHandler(kanbanConfigRepo, emailRepo, gmailService, cfg)
 
 	// Initialize Gin
 	r := gin.Default()
@@ -114,6 +122,21 @@ func main() {
 		protected.POST("/kanban/move", kanbanHandler.Move)
 		protected.POST("/kanban/snooze", kanbanHandler.Snooze)
 		protected.POST("/kanban/summarize", kanbanHandler.Summarize)
+
+		// Week 4: Search routes
+		protected.POST("/search/semantic", searchHandler.SemanticSearch)
+		protected.GET("/search/suggestions", searchHandler.GetSuggestions)
+		protected.POST("/search/generate-embeddings", searchHandler.GenerateEmbeddings)
+
+		// Week 4: Kanban configuration routes
+		protected.GET("/kanban/columns", kanbanConfigHandler.GetColumns)
+		protected.POST("/kanban/columns", kanbanConfigHandler.CreateColumn)
+		protected.PUT("/kanban/columns/:id", kanbanConfigHandler.UpdateColumn)
+		protected.DELETE("/kanban/columns/:id", kanbanConfigHandler.DeleteColumn)
+		protected.POST("/kanban/columns/reorder", kanbanConfigHandler.ReorderColumns)
+
+		// Week 4: Gmail labels route
+		protected.GET("/gmail/labels", kanbanConfigHandler.GetGmailLabels)
 	}
 
 	// Swagger route
