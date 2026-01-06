@@ -2,11 +2,13 @@ package services
 
 import (
 	"aiemailbox-be/internal/repository"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"regexp"
 	"sort"
@@ -25,15 +27,17 @@ type LocalSummaryService struct {
 	repo     *repository.EmailRepository
 	apiKey   string
 	provider string
+	model    string
 	client   *http.Client
 }
 
 // NewSummaryService creates a new summary service. If apiKey is empty, it runs purely local extractor.
-func NewSummaryService(repo *repository.EmailRepository, apiKey, provider string) SummaryService {
+func NewSummaryService(repo *repository.EmailRepository, apiKey, provider, model string) SummaryService {
 	return &LocalSummaryService{
 		repo:     repo,
 		apiKey:   apiKey,
 		provider: strings.ToLower(provider),
+		model:    model,
 		client: &http.Client{
 			Timeout: 15 * time.Second,
 		},
@@ -71,20 +75,89 @@ func (s *LocalSummaryService) SummarizeText(ctx context.Context, text string) (s
 		return "", nil
 	}
 
-	// If API key present, attempt provider call (OpenAI)
+	// If API key present, attempt provider call
 	if s.apiKey != "" {
-		// default to openai when provider unset
-		if s.provider == "" || s.provider == "openai" {
+		if s.provider == "gemini" {
+			summ, err := s.callGemini(ctx, text)
+			if err == nil && strings.TrimSpace(summ) != "" {
+				return summ, nil
+			}
+			fmt.Printf("Gemini summary failed, falling back: %v\n", err)
+		} else if s.provider == "" || s.provider == "openai" {
 			summ, err := s.callOpenAI(ctx, text)
 			if err == nil && strings.TrimSpace(summ) != "" {
 				return summ, nil
 			}
-			// fallthrough to local extractor on error
 		}
 	}
 
 	// Local extractive summarizer (free)
 	return extractiveSummary(text, 2, 300), nil
+}
+
+// callGemini calls Google Gemini API. Returns summary or error.
+func (s *LocalSummaryService) callGemini(ctx context.Context, text string) (string, error) {
+	// Use configured model or default to gemini-1.5-flash for speed and efficiency
+	model := s.model
+	if model == "" {
+		model = "gemini-1.5-flash"
+	}
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, s.apiKey)
+
+	reqBody := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]string{
+					{"text": "Summarize the following email in 2-3 concise sentences:\n\n" + text},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature":     0.2,
+			"maxOutputTokens": 200,
+		},
+	}
+
+	b, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Gemini API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var parsed struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return "", err
+	}
+
+	if len(parsed.Candidates) > 0 && len(parsed.Candidates[0].Content.Parts) > 0 {
+		return strings.TrimSpace(parsed.Candidates[0].Content.Parts[0].Text), nil
+	}
+	return "", errors.New("no content in Gemini response")
 }
 
 // callOpenAI calls OpenAI Chat Completions API (simple implementation). Returns summary or error.
@@ -93,8 +166,12 @@ func (s *LocalSummaryService) callOpenAI(ctx context.Context, text string) (stri
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	}
+	model := s.model
+	if model == "" {
+		model = "gpt-3.5-turbo"
+	}
 	reqBody := map[string]interface{}{
-		"model": "gpt-3.5-turbo",
+		"model": model,
 		"messages": []message{
 			{Role: "system", Content: "You are a concise email summarizer. Return a short summary (2-3 sentences)."},
 			{Role: "user", Content: "Summarize the following email:\n\n" + text},

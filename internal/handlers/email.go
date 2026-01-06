@@ -4,12 +4,15 @@ import (
 	"aiemailbox-be/internal/models"
 	"aiemailbox-be/internal/repository"
 	"aiemailbox-be/internal/services"
+	"aiemailbox-be/internal/utils"
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sahilm/fuzzy"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -154,6 +157,209 @@ func (h *EmailHandler) GetEmails(c *gin.Context) {
 		PerPage:     perPage,
 		HasNextPage: false, // Simplified for now
 	})
+}
+
+// SearchEmails searches for emails
+// SearchEmails godoc
+// @Summary      Search emails
+// @Description  Search emails by fuzzy query (subject, sender, summary)
+// @Tags         emails
+// @Produce      json
+// @Param        q           query     string  true  "Search query"
+// @Success      200  {object}  []models.Email
+// @Failure      401  {object}  models.ErrorResponse
+// @Failure      500  {object}  models.ErrorResponse
+// @Security     ApiKeyAuth
+// @Router       /emails/search [get]
+func (h *EmailHandler) SearchEmails(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	query := c.Query("q")
+	pageToken := c.Query("pageToken")
+
+	if query == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "Query parameter 'q' is required",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	user, err := h.userRepo.FindByID(ctx, userID.(string))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "user_not_found",
+			Message: "User not found",
+		})
+		return
+	}
+
+	// 1. Gmail API Search (Primary - Exact/Global)
+	gmailEmails, nextPageToken, estimate, err := h.gmailService.SearchEmails(ctx, user, query, pageToken)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "search_error",
+			Message: "Failed to search emails: " + err.Error(),
+		})
+		return
+	}
+
+	// 2. Local MongoDB Search (Secondary - Partial Regex)
+	localEmails, err := h.emailRepo.SearchEmails(ctx, user.ID.Hex(), query)
+	if err != nil {
+		// Log error but continue with Gmail results
+		localEmails = []models.Email{}
+	}
+
+	// Merge results (Deduplicate by ID)
+	emailMap := make(map[string]models.Email)
+	for _, e := range gmailEmails {
+		emailMap[e.ID] = *e
+	}
+	for _, e := range localEmails {
+		if _, exists := emailMap[e.ID]; !exists {
+			emailMap[e.ID] = e
+		}
+	}
+
+	// 3. Fuzzy Search Fallback (If no results found)
+	// Only if generic query (not too short) and no results so far.
+	if len(emailMap) == 0 && len(query) > 3 {
+		// Fetch all local emails (excluding trash, via GetKanban)
+		kanbanMap, err := h.emailRepo.GetKanban(ctx, user.ID.Hex())
+		if err == nil {
+			// Pre-process candidates for fuzzy search (Sanitize HTML once)
+
+			var searchableItems []SearchableEmail
+			for _, list := range kanbanMap {
+				for i := range list {
+					// Use pointer to avoid copying big structs
+					e := &list[i]
+					// Combine fields and sanitize
+					rawText := e.Subject + " " + e.From.Name + " " + e.From.Email + " " + e.Body
+					cleanText := utils.SanitizeHTML(rawText)
+					searchableItems = append(searchableItems, SearchableEmail{
+						Original:   e,
+						SearchText: cleanText,
+					})
+				}
+			}
+
+			// Use sahilm/fuzzy for search
+			src := &EmailSource{items: searchableItems}
+			matches := fuzzy.FindFrom(query, src)
+
+			for _, match := range matches {
+				// Debug logging to help tune threshold
+				// fmt.Printf("Query: %s, Match: %s, Score: %d\n", query, searchableItems[match.Index].SearchText, match.Score)
+
+				// Threshold: Match score must be at least the query length.
+				// This filters out very weak/scattered matches.
+				if match.Score < len(query) {
+					continue
+				}
+
+				if match.Index < len(searchableItems) {
+					email := searchableItems[match.Index].Original
+					emailMap[email.ID] = *email
+				}
+			}
+		}
+	}
+
+	// Convert map to slice
+	finalEmails := make([]*models.Email, 0, len(emailMap))
+	for _, e := range emailMap {
+		val := e // copy
+		// Sanitize Preview and Summary for display
+		val.Preview = utils.SanitizeHTML(val.Preview)
+		val.Summary = utils.SanitizeHTML(val.Summary)
+		// Clear body to reduce payload and force detail fetch (which ensures full content is loaded on click)
+		val.Body = ""
+
+		finalEmails = append(finalEmails, &val)
+	}
+
+	// Sync valid Gmail results to local DB (as before)
+	// We only sync the DIRECT Gmail results to ensure we have the latest data for them.
+	// Local results are already local.
+	if len(gmailEmails) > 0 {
+		go func(emails []*models.Email) {
+			syncCtx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+			defer cancel()
+			for _, e := range emails {
+				existing, err := h.emailRepo.GetByID(syncCtx, e.ID)
+				if err == nil && existing != nil {
+					e.Status = existing.Status
+					e.SnoozedUntil = existing.SnoozedUntil
+					e.Summary = existing.Summary
+				} else {
+					e.Status = models.StatusInbox
+				}
+				e.UserID = user.ID.Hex()
+				_ = h.emailRepo.UpsertEmail(syncCtx, e)
+			}
+		}(gmailEmails)
+	}
+
+	// Sort by ReceivedAt descending (newest first)
+	sort.Slice(finalEmails, func(i, j int) bool {
+		// Newest first means i > j (i is 'after' j)
+		return finalEmails[i].ReceivedAt.After(finalEmails[j].ReceivedAt)
+	})
+
+	// Sort by ReceivedAt descending (newest first)
+	sort.Slice(finalEmails, func(i, j int) bool {
+		// Newest first means i > j (i is 'after' j)
+		return finalEmails[i].ReceivedAt.After(finalEmails[j].ReceivedAt)
+	})
+
+	// Calculate total estimate (max of Gmail estimate or actual count)
+	totalEstimate := estimate
+	if len(finalEmails) > totalEstimate {
+		totalEstimate = len(finalEmails)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"emails":        finalEmails,
+		"nextPageToken": nextPageToken,
+		"totalEstimate": totalEstimate,
+	})
+}
+
+// Helper for fuzzy search
+type SearchableEmail struct {
+	Original   *models.Email
+	SearchText string
+}
+
+type EmailSource struct {
+	items []SearchableEmail
+}
+
+func (s *EmailSource) String(i int) string {
+	return s.items[i].SearchText
+}
+
+func (s *EmailSource) Len() int {
+	return len(s.items)
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // GetEmailDetail returns detailed information about a specific email
@@ -315,6 +521,28 @@ func (h *EmailHandler) ModifyEmail(c *gin.Context) {
 			Message: "Failed to modify email: " + err.Error(),
 		})
 		return
+	}
+
+	// Sync changes to local database immediately to reflect in Kanban/other views
+	// Fetch fresh details from Gmail to get current labels/state
+	updatedEmail, err := h.gmailService.GetEmail(ctx, user, emailID)
+	if err == nil {
+		// Preserve local fields that aren't on Gmail (like custom status, snoozedUntil if any - though modify might affect them)
+		// For now, simple Upsert is safe as it overwrites with fresh Gmail data.
+		// However, we must ensure we don't lose custom Status if it's not stored in Gmail.
+		// Actually, GetEmail from GmailService might return a default Status if not found map?
+		// Let's check repository.GetByID first.
+		existing, _ := h.emailRepo.GetByID(ctx, emailID)
+		if existing != nil {
+			updatedEmail.Status = existing.Status
+			updatedEmail.SnoozedUntil = existing.SnoozedUntil
+			updatedEmail.Summary = existing.Summary
+		} else {
+			// If not in DB, default?
+			updatedEmail.Status = models.StatusInbox
+		}
+		updatedEmail.UserID = user.ID.Hex()
+		_ = h.emailRepo.UpsertEmail(ctx, updatedEmail)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Email modified successfully"})

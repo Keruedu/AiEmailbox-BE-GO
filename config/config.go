@@ -23,8 +23,14 @@ type Config struct {
 	// New fields for GA05
 	LLMApiKey           string
 	LLMProvider         string
+	LLMModel            string // Configurable model for summarization
 	SnoozeCheckInterval time.Duration
 	KanbanColumns       []string
+
+	// Week 4: Embedding/Semantic Search config
+	EmbeddingProvider string // "openai" | "gemini" | "local"
+	EmbeddingAPIKey   string
+	EmbeddingModel    string
 }
 
 func Load() *Config {
@@ -39,6 +45,8 @@ func Load() *Config {
 	// new values
 	llmKey := getEnv("LLM_API_KEY", "")
 	llmProvider := getEnv("LLM_PROVIDER", "")
+	llmModel := getEnv("LLM_MODEL", "") // Empty defaults to internal default
+
 	snoozeIntervalStr := getEnv("SNOOZE_CHECK_INTERVAL", "1m")
 	snoozeInterval, err := time.ParseDuration(snoozeIntervalStr)
 	if err != nil {
@@ -65,8 +73,14 @@ func Load() *Config {
 
 		LLMApiKey:           llmKey,
 		LLMProvider:         llmProvider,
+		LLMModel:            llmModel,
 		SnoozeCheckInterval: snoozeInterval,
 		KanbanColumns:       cols,
+
+		// Week 4: Embedding config
+		EmbeddingProvider: getEnv("EMBEDDING_PROVIDER", "openai"),
+		EmbeddingAPIKey:   getEnv("EMBEDDING_API_KEY", ""),
+		EmbeddingModel:    getEnv("EMBEDDING_MODEL", "text-embedding-ada-002"),
 	}
 }
 

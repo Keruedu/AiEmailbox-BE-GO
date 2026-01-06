@@ -24,14 +24,16 @@ func NewKanbanHandler(repo *repository.EmailRepository, summary services.Summary
 
 // Card represents the Kanban card shape returned to the client
 type Card struct {
-	ID           string     `json:"id"`
-	Sender       string     `json:"sender"`
-	Subject      string     `json:"subject"`
-	Summary      string     `json:"summary"`
-	Preview      string     `json:"preview"`
-	GmailURL     string     `json:"gmail_url"`
-	SnoozedUntil *time.Time `json:"snoozed_until,omitempty"`
-	ReceivedAt   time.Time  `json:"received_at"`
+	ID             string     `json:"id"`
+	Sender         string     `json:"sender"`
+	Subject        string     `json:"subject"`
+	Summary        string     `json:"summary"`
+	Preview        string     `json:"preview"`
+	GmailURL       string     `json:"gmail_url"`
+	SnoozedUntil   *time.Time `json:"snoozed_until,omitempty"`
+	ReceivedAt     time.Time  `json:"received_at"`
+	IsRead         bool       `json:"is_read"`
+	HasAttachments bool       `json:"has_attachments"`
 }
 
 // ColMeta describes a single column metadata item returned by /api/kanban/meta
@@ -87,14 +89,16 @@ func (h *KanbanHandler) GetKanban(c *gin.Context) {
 				sender = e.From.Name
 			}
 			card := Card{
-				ID:           e.ID,
-				Sender:       sender,
-				Subject:      e.Subject,
-				Summary:      e.Summary,
-				Preview:      e.Preview,
-				GmailURL:     e.GmailURL,
-				SnoozedUntil: e.SnoozedUntil,
-				ReceivedAt:   e.ReceivedAt,
+				ID:             e.ID,
+				Sender:         sender,
+				Subject:        e.Subject,
+				Summary:        e.Summary,
+				Preview:        e.Preview,
+				GmailURL:       e.GmailURL,
+				SnoozedUntil:   e.SnoozedUntil,
+				ReceivedAt:     e.ReceivedAt,
+				IsRead:         e.IsRead,
+				HasAttachments: e.HasAttachments,
 			}
 			resp[status] = append(resp[status], card)
 		}

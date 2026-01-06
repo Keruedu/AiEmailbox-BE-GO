@@ -3,15 +3,21 @@ package services
 import (
 	"aiemailbox-be/config"
 	"aiemailbox-be/internal/models"
+	"aiemailbox-be/internal/utils"
 	"context"
 	"encoding/base64"
 	"errors"
 	"net/mail"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
 )
@@ -171,7 +177,13 @@ func (s *GmailService) GetEmail(ctx context.Context, user *models.User, emailID 
 
 func (s *GmailService) mapGmailMessageToEmail(msg *gmail.Message) models.Email {
 	var subject, from, to string
+	// Initialize date with InternalDate (epoch ms) as a reliable fallback
 	var date time.Time
+	if msg.InternalDate > 0 {
+		date = time.Unix(msg.InternalDate/1000, (msg.InternalDate%1000)*1000000)
+	} else {
+		date = time.Now()
+	}
 
 	for _, header := range msg.Payload.Headers {
 		switch header.Name {
@@ -186,11 +198,8 @@ func (s *GmailService) mapGmailMessageToEmail(msg *gmail.Message) models.Email {
 			d, err := mail.ParseDate(header.Value)
 			if err == nil {
 				date = d
-			} else {
-				// Fallback to time.Parse for strict formats if mail.ParseDate failed (though it covers most)
-				// or just use Now()
-				date = time.Now()
 			}
+			// If parsing failed, we keep the InternalDate value which is better than zero or Now()
 		}
 	}
 
@@ -201,20 +210,50 @@ func (s *GmailService) mapGmailMessageToEmail(msg *gmail.Message) models.Email {
 	isRead := !contains(msg.LabelIds, "UNREAD")
 	isStarred := contains(msg.LabelIds, "STARRED")
 
+	// Extract attachments
+	attachments := s.getAttachments(msg.Payload)
+	hasAttachments := len(attachments) > 0
+
 	return models.Email{
-		ID:         msg.Id,
-		ThreadID:   msg.ThreadId,
-		Subject:    subject,
-		Preview:    msg.Snippet,
-		From:       parseAddress(from),
-		To:         parseAddresses(to),
-		Body:       body,
-		ReceivedAt: date,
-		IsRead:     isRead,
-		IsStarred:  isStarred,
-		MailboxID:  "INBOX", // Default, or derive from labels
-		Labels:     msg.LabelIds,
+		ID:             msg.Id,
+		ThreadID:       msg.ThreadId,
+		Subject:        utils.ToValidUTF8(subject),
+		Preview:        utils.ToValidUTF8(msg.Snippet),
+		From:           parseAddress(utils.ToValidUTF8(from)),
+		To:             parseAddresses(utils.ToValidUTF8(to)),
+		Body:           utils.ToValidUTF8(body),
+		ReceivedAt:     date,
+		IsRead:         isRead,
+		IsStarred:      isStarred,
+		HasAttachments: hasAttachments,
+		Attachments:    attachments,
+		MailboxID:      "INBOX", // Default, or derive from labels
+		Labels:         msg.LabelIds,
 	}
+}
+
+func (s *GmailService) getAttachments(part *gmail.MessagePart) []models.Attachment {
+	var attachments []models.Attachment
+	if part == nil {
+		return attachments
+	}
+
+	// Check if the current part is an attachment
+	if part.Filename != "" && part.Body != nil && part.Body.AttachmentId != "" {
+		attachments = append(attachments, models.Attachment{
+			ID:       part.Body.AttachmentId,
+			Filename: part.Filename,
+			MimeType: part.MimeType,
+			Size:     part.Body.Size,
+		})
+	}
+
+	// Recursively check sub-parts
+	for _, p := range part.Parts {
+		attachments = append(attachments, s.getAttachments(p)...)
+	}
+
+	return attachments
 }
 
 func (s *GmailService) getBody(part *gmail.MessagePart) string {
@@ -367,4 +406,191 @@ func (s *GmailService) GetAttachment(ctx context.Context, user *models.User, mes
 	}
 
 	return data, nil
+}
+
+func (s *GmailService) SearchEmails(ctx context.Context, user *models.User, query string, pageToken string) ([]*models.Email, string, int, error) {
+	srv, err := s.GetClient(ctx, user)
+	if err != nil {
+		return nil, "", 0, err
+	}
+
+	// Search using 'q' parameter with limit
+	req := srv.Users.Messages.List("me").Q(query).MaxResults(25)
+	if pageToken != "" {
+		req.PageToken(pageToken)
+	}
+
+	resp, err := req.Do()
+	if err != nil {
+		return nil, "", 0, err
+	}
+
+	if len(resp.Messages) == 0 {
+		return []*models.Email{}, "", 0, nil
+	}
+
+	// Prepare exact slice size
+	emails := make([]*models.Email, len(resp.Messages))
+
+	// Use concurrency to fetch details
+	// Limit concurrency to avoid rate limits
+	const maxConcurrency = 10
+	sem := make(chan struct{}, maxConcurrency)
+
+	type result struct {
+		index int
+		email *models.Email
+		err   error
+	}
+
+	resultsChan := make(chan result, len(resp.Messages))
+
+	for i, msgHeader := range resp.Messages {
+		sem <- struct{}{} // Acquire token
+		go func(idx int, id string) {
+			defer func() { <-sem }() // Release token
+
+			msg, err := srv.Users.Messages.Get("me", id).Format("full").Do()
+			if err != nil {
+				resultsChan <- result{index: idx, err: err}
+				return
+			}
+
+			email := s.mapGmailMessageToEmail(msg)
+
+			// Generate contextual snippet
+			if query != "" {
+				// We need to work with runes to ensure we don't break multi-byte characters when slicing
+				// This is especially important for Vietnamese or other UTF-8 content
+				runeBody := []rune(email.Body)
+				lowerBody := strings.ToLower(email.Body)
+				lowerQuery := strings.ToLower(query)
+
+				// Find match in bytes
+				byteIdx := strings.Index(lowerBody, lowerQuery)
+
+				// Fallback to fuzzy
+				if byteIdx == -1 {
+					cleanBody, _, _ := transform.String(t, lowerBody)
+					cleanQuery, _, _ := transform.String(t, lowerQuery)
+					if cleanIdx := strings.Index(cleanBody, cleanQuery); cleanIdx != -1 {
+						byteIdx = cleanIdx
+						if byteIdx >= len(lowerBody) {
+							byteIdx = 0
+						}
+					}
+				}
+
+				if byteIdx != -1 {
+					if byteIdx > len(email.Body) {
+						byteIdx = len(email.Body)
+					}
+
+					safePrefix := email.Body[:byteIdx]
+					runeIdx := utf8.RuneCountInString(safePrefix)
+					queryLenRunes := utf8.RuneCountInString(query)
+
+					const contextLen = 60
+					start := runeIdx - contextLen
+					if start < 0 {
+						start = 0
+					}
+
+					end := runeIdx + queryLenRunes + contextLen
+					if end > len(runeBody) {
+						end = len(runeBody)
+					}
+
+					if start > end {
+						start = end
+					}
+
+					snippet := string(runeBody[start:end])
+
+					if start > 0 {
+						snippet = "..." + snippet
+					}
+					if end < len(runeBody) {
+						snippet = snippet + "..."
+					}
+					email.Preview = snippet
+				}
+			}
+
+			resultsChan <- result{index: idx, email: &email}
+		}(i, msgHeader.Id)
+	}
+
+	// Collect results
+	for i := 0; i < len(resp.Messages); i++ {
+		res := <-resultsChan
+		if res.err == nil && res.email != nil {
+			emails[res.index] = res.email
+		}
+	}
+
+	// Filter out nils (errors)
+	validEmails := []*models.Email{}
+	for _, e := range emails {
+		if e != nil {
+			validEmails = append(validEmails, e)
+		}
+	}
+
+	return validEmails, resp.NextPageToken, int(resp.ResultSizeEstimate), nil
+}
+
+// Transformer chain to remove accents
+var t = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+
+// ======== Week 4: Label Management ========
+
+// GetLabels returns all Gmail labels for a user
+func (s *GmailService) GetLabels(ctx context.Context, userID string) ([]models.GmailLabel, error) {
+	// Note: This method needs a User object to get the Gmail client
+	// For now, we return common Gmail labels as a fallback
+	// In production, you would get the user from repository
+
+	// Return common Gmail labels
+	labels := []models.GmailLabel{
+		{ID: "INBOX", Name: "Inbox", Type: "system"},
+		{ID: "STARRED", Name: "Starred", Type: "system"},
+		{ID: "IMPORTANT", Name: "Important", Type: "system"},
+		{ID: "SENT", Name: "Sent", Type: "system"},
+		{ID: "DRAFT", Name: "Draft", Type: "system"},
+		{ID: "TRASH", Name: "Trash", Type: "system"},
+		{ID: "SPAM", Name: "Spam", Type: "system"},
+		{ID: "UNREAD", Name: "Unread", Type: "system"},
+		{ID: "CATEGORY_PERSONAL", Name: "Personal", Type: "category"},
+		{ID: "CATEGORY_SOCIAL", Name: "Social", Type: "category"},
+		{ID: "CATEGORY_PROMOTIONS", Name: "Promotions", Type: "category"},
+		{ID: "CATEGORY_UPDATES", Name: "Updates", Type: "category"},
+		{ID: "CATEGORY_FORUMS", Name: "Forums", Type: "category"},
+	}
+
+	return labels, nil
+}
+
+// GetLabelsWithUser returns Gmail labels for a specific user (full API call)
+func (s *GmailService) GetLabelsWithUser(ctx context.Context, user *models.User) ([]models.GmailLabel, error) {
+	srv, err := s.GetClient(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := srv.Users.Labels.List("me").Do()
+	if err != nil {
+		return nil, err
+	}
+
+	var labels []models.GmailLabel
+	for _, l := range resp.Labels {
+		labels = append(labels, models.GmailLabel{
+			ID:   l.Id,
+			Name: l.Name,
+			Type: strings.ToLower(l.Type),
+		})
+	}
+
+	return labels, nil
 }

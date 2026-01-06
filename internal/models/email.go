@@ -49,6 +49,8 @@ type Email struct {
 	Labels         []string     `json:"labels,omitempty" bson:"labels,omitempty"`
 	ReceivedAt     time.Time    `json:"receivedAt" bson:"receivedAt"`
 	CreatedAt      time.Time    `json:"createdAt" bson:"createdAt"`
+	// Week 4: Vector embedding for semantic search
+	Embedding []float32 `json:"-" bson:"embedding,omitempty"`
 }
 
 type EmailAddress struct {
