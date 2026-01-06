@@ -105,6 +105,98 @@ The server will start on `http://localhost:8080`
 
 **Note:** With vendored dependencies, Go will automatically use the `vendor/` directory instead of the global module cache.
 
+## Docker Setup (Recommended)
+
+### Prerequisites
+
+- Docker
+- Docker Compose
+
+### Quick Start with Docker Compose
+
+The easiest way to run the backend with MongoDB is using the included `docker-compose.yml`:
+
+```bash
+# 1. Navigate to the backend directory
+cd AiEmailbox-BE-GO
+
+# 2. Configure environment variables (optional)
+# Edit the .env file with your settings
+cp .env.example .env
+
+# 3. Start the backend and MongoDB
+docker-compose up -d
+
+# 4. Check logs
+docker-compose logs -f
+
+# 5. The backend will be available at http://localhost:8080
+```
+
+### Docker Compose Services
+
+The `docker-compose.yml` includes:
+
+- **MongoDB** (`aiemailbox-backend-mongodb`)
+  - Port: 27017
+  - Database: aiemailbox
+  - Data persisted in volume `mongodb_data`
+
+- **Backend API** (`aiemailbox-backend-go`)
+  - Port: 8080
+  - Depends on MongoDB being healthy
+  - Auto-restart enabled
+
+### Useful Commands
+
+```bash
+# Start services in background
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# View logs of specific service
+docker-compose logs -f backend
+
+# Stop services
+docker-compose down
+
+# Stop and remove all data (including MongoDB)
+docker-compose down -v
+
+# Rebuild image and restart
+docker-compose up -d --build
+
+# Check service status
+docker-compose ps
+
+# Access MongoDB shell (if needed)
+docker exec -it aiemailbox-backend-mongodb mongosh
+
+# View container info
+docker inspect aiemailbox-backend-go
+```
+
+### Environment Variables
+
+Configure the `.env` file in the AiEmailbox-BE-GO directory:
+
+```env
+PORT=8080
+JWT_SECRET=your-secret-key-change-in-production
+JWT_ACCESS_EXPIRATION=15m
+JWT_REFRESH_EXPIRATION=7d
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+FRONTEND_URL=http://localhost:3000
+MONGODB_URI=mongodb://mongodb:27017
+MONGODB_DATABASE=aiemailbox
+```
+
+**Note:** The `MONGODB_URI` in docker-compose uses the service name `mongodb` as hostname, not `localhost`.
+
+
 ## API Endpoints
 
 ### Authentication
