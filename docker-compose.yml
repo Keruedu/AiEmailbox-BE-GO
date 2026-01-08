@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:latest
+    container_name: aiemailbox-backend-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=aiemailbox
+    networks:
+      - backend-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/aiemailbox --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend Go Application
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aiemailbox-backend-go
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - PORT=8080
+      - GIN_MODE=release
+      - MONGODB_URI=mongodb://mongodb:27017
+      - MONGODB_DATABASE=aiemailbox
+    volumes:
+      # Mount .env file để dễ dàng cập nhật cấu hình
+      - ./.env:/root/.env:ro
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  backend-network:
+    driver: bridge
+    name: aiemailbox-backend-network
+
+volumes:
+  mongodb_data:
+    driver: local
