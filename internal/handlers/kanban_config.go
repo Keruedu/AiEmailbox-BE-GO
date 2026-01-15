@@ -68,6 +68,11 @@ func (h *KanbanConfigHandler) GetColumns(c *gin.Context) {
 		return
 	}
 
+	// Set no-cache headers to prevent browser caching
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+
 	c.JSON(http.StatusOK, gin.H{"columns": columns})
 }
 
@@ -191,13 +196,13 @@ func (h *KanbanConfigHandler) UpdateColumn(c *gin.Context) {
 		return
 	}
 
-	if err := h.configRepo.UpdateColumn(ctx, columnID, updates); err != nil {
+	// Use FindOneAndUpdate to get the updated document atomically
+	updatedColumn, err := h.configRepo.UpdateColumnAndReturn(ctx, columnID, updates)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update column"})
 		return
 	}
 
-	// Get updated column
-	updatedColumn, _ := h.configRepo.GetColumnByID(ctx, columnID)
 	c.JSON(http.StatusOK, updatedColumn)
 }
 
@@ -248,7 +253,19 @@ func (h *KanbanConfigHandler) DeleteColumn(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	// Return remaining columns after deletion
+	columns, err := h.configRepo.GetColumns(ctx, userID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch updated columns"})
+		return
+	}
+
+	// Set no-cache headers
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+
+	c.JSON(http.StatusOK, gin.H{"columns": columns})
 }
 
 // ReorderColumns godoc
@@ -281,7 +298,19 @@ func (h *KanbanConfigHandler) ReorderColumns(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	// Return updated columns list
+	columns, err := h.configRepo.GetColumns(ctx, userID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch updated columns"})
+		return
+	}
+
+	// Set no-cache headers
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+
+	c.JSON(http.StatusOK, gin.H{"columns": columns})
 }
 
 // ========== Gmail Labels Endpoints ==========

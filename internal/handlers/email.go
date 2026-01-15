@@ -103,7 +103,7 @@ func (h *EmailHandler) GetEmails(c *gin.Context) {
 
 	mailboxID := c.Param("mailboxId")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("perPage", "50"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -430,20 +430,95 @@ func (h *EmailHandler) SendEmail(c *gin.Context) {
 	}
 
 	var req struct {
-		To      string `json:"to"`
-		Subject string `json:"subject"`
-		Body    string `json:"body"`
+		To       []string `json:"to"`
+		Cc       []string `json:"cc,omitempty"`
+		Bcc      []string `json:"bcc,omitempty"`
+		Subject  string   `json:"subject"`
+		Body     string   `json:"body"`
+		ThreadID string   `json:"threadId,omitempty"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "invalid_request",
-			Message: "Invalid request body",
-		})
-		return
+	// Check Content-Type to determine how to parse
+	contentType := c.ContentType()
+	var attachments []*models.Attachment
+	
+	if contentType == "multipart/form-data" || c.Request.MultipartForm != nil {
+		// Parse multipart form
+		if err := c.Request.ParseMultipartForm(32 << 20); err != nil { // 32MB max
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error:   "invalid_request",
+				Message: "Failed to parse multipart form: " + err.Error(),
+			})
+			return
+		}
+		
+		// Get JSON fields from form
+		toJSON := c.PostForm("to")
+		ccJSON := c.PostForm("cc")
+		bccJSON := c.PostForm("bcc")
+		req.Subject = c.PostForm("subject")
+		req.Body = c.PostForm("body")
+		req.ThreadID = c.PostForm("threadId")
+		
+		// Parse JSON arrays
+		if toJSON != "" {
+			if err := utils.ParseJSON(toJSON, &req.To); err != nil {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse{
+					Error:   "invalid_request",
+					Message: "Invalid 'to' field",
+				})
+				return
+			}
+		}
+		if ccJSON != "" {
+			if err := utils.ParseJSON(ccJSON, &req.Cc); err != nil {
+				req.Cc = []string{}
+			}
+		}
+		if bccJSON != "" {
+			if err := utils.ParseJSON(bccJSON, &req.Bcc); err != nil {
+				req.Bcc = []string{}
+			}
+		}
+		
+		// Get files
+		form := c.Request.MultipartForm
+		if form != nil && form.File != nil {
+			files := form.File["attachments"]
+			for _, fileHeader := range files {
+				file, err := fileHeader.Open()
+				if err != nil {
+					continue
+				}
+				defer file.Close()
+				
+				// Read file content
+				content := make([]byte, fileHeader.Size)
+				_, err = file.Read(content)
+				if err != nil {
+					continue
+				}
+				
+				attachments = append(attachments, &models.Attachment{
+					Filename:    fileHeader.Filename,
+					MimeType:    fileHeader.Header.Get("Content-Type"),
+					Size:        fileHeader.Size,
+					Data:        content,
+				})
+			}
+		}
+	} else {
+		// Parse JSON body
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error:   "invalid_request",
+				Message: "Invalid request body",
+			})
+			return
+		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	user, err := h.userRepo.FindByID(ctx, userID.(string))
@@ -455,10 +530,30 @@ func (h *EmailHandler) SendEmail(c *gin.Context) {
 		return
 	}
 
+	// Convert string arrays to EmailAddress arrays
+	toAddresses := make([]models.EmailAddress, len(req.To))
+	for i, to := range req.To {
+		toAddresses[i] = models.EmailAddress{Email: to}
+	}
+	
+	ccAddresses := make([]models.EmailAddress, len(req.Cc))
+	for i, cc := range req.Cc {
+		ccAddresses[i] = models.EmailAddress{Email: cc}
+	}
+	
+	bccAddresses := make([]models.EmailAddress, len(req.Bcc))
+	for i, bcc := range req.Bcc {
+		bccAddresses[i] = models.EmailAddress{Email: bcc}
+	}
+
 	email := &models.Email{
-		To:      []models.EmailAddress{{Email: req.To}},
-		Subject: req.Subject,
-		Body:    req.Body,
+		To:          toAddresses,
+		Cc:          ccAddresses,
+		Bcc:         bccAddresses,
+		Subject:     req.Subject,
+		Body:        req.Body,
+		ThreadID:    req.ThreadID,
+		Attachments: attachments,
 	}
 
 	if err := h.gmailService.SendEmail(ctx, user, email); err != nil {
@@ -474,7 +569,7 @@ func (h *EmailHandler) SendEmail(c *gin.Context) {
 
 // ReplyEmail replies to an existing email
 func (h *EmailHandler) ReplyEmail(c *gin.Context) {
-	// For now, this is same as SendEmail but could be enhanced to check thread ID
+	// Use the same SendEmail logic
 	h.SendEmail(c)
 }
 

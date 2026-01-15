@@ -38,17 +38,17 @@ type Email struct {
 	Preview   string         `json:"preview" bson:"preview"`
 	Body      string         `json:"body" bson:"body"`
 	// Workflow fields for Kanban
-	Status         EmailStatus  `json:"status" bson:"status"`
-	SnoozedUntil   *time.Time   `json:"snoozedUntil,omitempty" bson:"snoozedUntil,omitempty"`
-	Summary        string       `json:"summary,omitempty" bson:"summary,omitempty"`
-	GmailURL       string       `json:"gmailUrl,omitempty" bson:"gmailUrl,omitempty"`
-	IsRead         bool         `json:"isRead" bson:"isRead"`
-	IsStarred      bool         `json:"isStarred" bson:"isStarred"`
-	HasAttachments bool         `json:"hasAttachments" bson:"hasAttachments"`
-	Attachments    []Attachment `json:"attachments,omitempty" bson:"attachments,omitempty"`
-	Labels         []string     `json:"labels,omitempty" bson:"labels,omitempty"`
-	ReceivedAt     time.Time    `json:"receivedAt" bson:"receivedAt"`
-	CreatedAt      time.Time    `json:"createdAt" bson:"createdAt"`
+	Status         EmailStatus   `json:"status" bson:"status"`
+	SnoozedUntil   *time.Time    `json:"snoozedUntil,omitempty" bson:"snoozedUntil,omitempty"`
+	Summary        string        `json:"summary,omitempty" bson:"summary,omitempty"`
+	GmailURL       string        `json:"gmailUrl,omitempty" bson:"gmailUrl,omitempty"`
+	IsRead         bool          `json:"isRead" bson:"isRead"`
+	IsStarred      bool          `json:"isStarred" bson:"isStarred"`
+	HasAttachments bool          `json:"hasAttachments" bson:"hasAttachments"`
+	Attachments    []*Attachment `json:"attachments,omitempty" bson:"attachments,omitempty"`
+	Labels         []string      `json:"labels,omitempty" bson:"labels,omitempty"`
+	ReceivedAt     time.Time     `json:"receivedAt" bson:"receivedAt"`
+	CreatedAt      time.Time     `json:"createdAt" bson:"createdAt"`
 	// Week 4: Vector embedding for semantic search
 	Embedding []float32 `json:"-" bson:"embedding,omitempty"`
 }
@@ -64,6 +64,7 @@ type Attachment struct {
 	Size     int64  `json:"size" bson:"size"`
 	MimeType string `json:"mimeType" bson:"mimeType"`
 	URL      string `json:"url" bson:"url"`
+	Data     []byte `json:"-" bson:"-"` // For sending attachments (not stored)
 }
 
 type EmailListResponse struct {
