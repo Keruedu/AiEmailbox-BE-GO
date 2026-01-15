@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"encoding/json"
 	"html"
 	"regexp"
 	"strings"
@@ -112,4 +113,9 @@ func GenerateRelaxedRegex(s string) string {
 // ToValidUTF8 cleans strings to ensure they are valid UTF-8
 func ToValidUTF8(s string) string {
 	return strings.ToValidUTF8(s, "")
+}
+
+// ParseJSON parses a JSON string into a target interface
+func ParseJSON(jsonStr string, target interface{}) error {
+	return json.Unmarshal([]byte(jsonStr), target)
 }

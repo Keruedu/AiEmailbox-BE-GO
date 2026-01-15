@@ -84,6 +84,21 @@ func (r *KanbanConfigRepository) UpdateColumn(ctx context.Context, columnID stri
 	return err
 }
 
+// UpdateColumnAndReturn updates a column and returns the updated document
+func (r *KanbanConfigRepository) UpdateColumnAndReturn(ctx context.Context, columnID string, updates bson.M) (*models.KanbanColumn, error) {
+	filter := r.idFilter(columnID)
+	update := bson.M{"$set": updates}
+	after := options.After
+	opts := options.FindOneAndUpdateOptions{ReturnDocument: &after}
+	
+	var updated models.KanbanColumn
+	err := r.collection.FindOneAndUpdate(ctx, filter, update, &opts).Decode(&updated)
+	if err != nil {
+		return nil, err
+	}
+	return &updated, nil
+}
+
 // DeleteColumn deletes a column
 func (r *KanbanConfigRepository) DeleteColumn(ctx context.Context, columnID string) error {
 	filter := r.idFilter(columnID)
@@ -109,14 +124,27 @@ func (r *KanbanConfigRepository) GetMaxOrder(ctx context.Context, userID string)
 
 // ReorderColumns updates the order of multiple columns
 func (r *KanbanConfigRepository) ReorderColumns(ctx context.Context, userID string, columnIDs []string) error {
+	// Use BulkWrite for better performance
+	var operations []mongo.WriteModel
+	
 	for i, id := range columnIDs {
-		filter := bson.M{"userId": userID, "_id": id}
+		// Use idFilter to handle both ObjectID and string formats
+		idFilter := r.idFilter(id)
+		// Also check userId to ensure user owns the column
+		filter := bson.M{"$and": []bson.M{idFilter, {"userId": userID}}}
 		update := bson.M{"$set": bson.M{"order": i}}
-		_, err := r.collection.UpdateOne(ctx, filter, update)
-		if err != nil {
-			return err
-		}
+		
+		operation := mongo.NewUpdateOneModel()
+		operation.SetFilter(filter)
+		operation.SetUpdate(update)
+		operations = append(operations, operation)
 	}
+	
+	if len(operations) > 0 {
+		_, err := r.collection.BulkWrite(ctx, operations)
+		return err
+	}
+	
 	return nil
 }
 
@@ -159,10 +187,15 @@ func (r *KanbanConfigRepository) GetColumnByKey(ctx context.Context, userID, key
 	return &column, nil
 }
 
-// helper to build ID filter
+// helper to build ID filter - tries both ObjectID and string formats
 func (r *KanbanConfigRepository) idFilter(columnID string) bson.M {
+	// Try as ObjectID first
 	if oid, err := primitive.ObjectIDFromHex(columnID); err == nil {
-		return bson.M{"_id": oid}
+		// Return filter that matches either ObjectID or string
+		return bson.M{"$or": []bson.M{
+			{"_id": oid},
+			{"_id": columnID},
+		}}
 	}
 	return bson.M{"_id": columnID}
 }

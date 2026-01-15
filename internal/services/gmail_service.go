@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/mail"
 	"strings"
 	"time"
@@ -232,15 +233,15 @@ func (s *GmailService) mapGmailMessageToEmail(msg *gmail.Message) models.Email {
 	}
 }
 
-func (s *GmailService) getAttachments(part *gmail.MessagePart) []models.Attachment {
-	var attachments []models.Attachment
+func (s *GmailService) getAttachments(part *gmail.MessagePart) []*models.Attachment {
+	var attachments []*models.Attachment
 	if part == nil {
 		return attachments
 	}
 
 	// Check if the current part is an attachment
 	if part.Filename != "" && part.Body != nil && part.Body.AttachmentId != "" {
-		attachments = append(attachments, models.Attachment{
+		attachments = append(attachments, &models.Attachment{
 			ID:       part.Body.AttachmentId,
 			Filename: part.Filename,
 			MimeType: part.MimeType,
@@ -360,13 +361,101 @@ func (s *GmailService) SendEmail(ctx context.Context, user *models.User, email *
 
 	var message gmail.Message
 
-	// Create the email content
-	// Headers
+	// Build recipient headers
+	toAddresses := make([]string, len(email.To))
+	for i, to := range email.To {
+		if to.Name != "" {
+			toAddresses[i] = to.Name + " <" + to.Email + ">"
+		} else {
+			toAddresses[i] = to.Email
+		}
+	}
+	
+	var ccAddresses []string
+	if len(email.Cc) > 0 {
+		ccAddresses = make([]string, len(email.Cc))
+		for i, cc := range email.Cc {
+			if cc.Name != "" {
+				ccAddresses[i] = cc.Name + " <" + cc.Email + ">"
+			} else {
+				ccAddresses[i] = cc.Email
+			}
+		}
+	}
+	
+	var bccAddresses []string
+	if len(email.Bcc) > 0 {
+		bccAddresses = make([]string, len(email.Bcc))
+		for i, bcc := range email.Bcc {
+			if bcc.Name != "" {
+				bccAddresses[i] = bcc.Name + " <" + bcc.Email + ">"
+			} else {
+				bccAddresses[i] = bcc.Email
+			}
+		}
+	}
+	
+	// Add In-Reply-To and References headers for reply/forward
+	if email.ThreadID != "" {
+		message.ThreadId = email.ThreadID
+	}
+
 	var msgString strings.Builder
-	msgString.WriteString("To: " + email.To[0].Email + "\r\n") // Simplified: only first recipient
+	
+	// Write common headers
+	msgString.WriteString("To: " + strings.Join(toAddresses, ", ") + "\r\n")
+	if len(ccAddresses) > 0 {
+		msgString.WriteString("Cc: " + strings.Join(ccAddresses, ", ") + "\r\n")
+	}
+	if len(bccAddresses) > 0 {
+		msgString.WriteString("Bcc: " + strings.Join(bccAddresses, ", ") + "\r\n")
+	}
 	msgString.WriteString("Subject: " + email.Subject + "\r\n")
-	msgString.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n")
-	msgString.WriteString(email.Body)
+	msgString.WriteString("MIME-Version: 1.0\r\n")
+	
+	// Check if we have attachments
+	if len(email.Attachments) > 0 {
+		// Use multipart/mixed for email with attachments
+		boundary := "----=_Part_" + fmt.Sprintf("%d", time.Now().UnixNano())
+		msgString.WriteString("Content-Type: multipart/mixed; boundary=\"" + boundary + "\"\r\n\r\n")
+		
+		// HTML body part
+		msgString.WriteString("--" + boundary + "\r\n")
+		msgString.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
+		msgString.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+		msgString.WriteString(base64.StdEncoding.EncodeToString([]byte(email.Body)))
+		msgString.WriteString("\r\n")
+		
+		// Attachments
+		for _, att := range email.Attachments {
+			if att == nil || att.Data == nil {
+				continue
+			}
+			msgString.WriteString("--" + boundary + "\r\n")
+			
+			// Determine MIME type
+			mimeType := att.MimeType
+			if mimeType == "" {
+				mimeType = "application/octet-stream"
+			}
+			
+			msgString.WriteString("Content-Type: " + mimeType + "; name=\"" + att.Filename + "\"\r\n")
+			msgString.WriteString("Content-Disposition: attachment; filename=\"" + att.Filename + "\"\r\n")
+			msgString.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+			
+			// Base64 encode the attachment
+			msgString.WriteString(base64.StdEncoding.EncodeToString(att.Data))
+			msgString.WriteString("\r\n")
+		}
+		
+		// End boundary
+		msgString.WriteString("--" + boundary + "--\r\n")
+	} else {
+		// Simple HTML email without attachments
+		msgString.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
+		msgString.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+		msgString.WriteString(base64.StdEncoding.EncodeToString([]byte(email.Body)))
+	}
 
 	message.Raw = base64.URLEncoding.EncodeToString([]byte(msgString.String()))
 
