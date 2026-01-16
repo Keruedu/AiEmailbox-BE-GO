@@ -4,7 +4,15 @@ definitions:
     properties:
       gmail_url:
         type: string
+      has_attachments:
+        type: boolean
       id:
+        type: string
+      is_read:
+        type: boolean
+      preview:
+        type: string
+      received_at:
         type: string
       sender:
         type: string
@@ -14,6 +22,12 @@ definitions:
         type: string
       summary:
         type: string
+    type: object
+  handlers.GenerateEmbeddingsRequest:
+    properties:
+      limit:
+        description: Max emails to process (default 50)
+        type: integer
     type: object
   handlers.MoveRequest:
     properties:
@@ -25,6 +39,33 @@ definitions:
     - email_id
     - to_status
     type: object
+  handlers.SearchResult:
+    properties:
+      email:
+        $ref: '#/definitions/models.Email'
+      score:
+        type: number
+    type: object
+  handlers.SemanticSearchRequest:
+    properties:
+      limit:
+        type: integer
+      query:
+        type: string
+    required:
+    - query
+    type: object
+  handlers.SemanticSearchResponse:
+    properties:
+      query:
+        type: string
+      results:
+        items:
+          $ref: '#/definitions/handlers.SearchResult'
+        type: array
+      total:
+        type: integer
+    type: object
   handlers.SnoozeRequest:
     properties:
       email_id:
@@ -35,6 +76,21 @@ definitions:
     required:
     - email_id
     - until
+    type: object
+  handlers.Suggestion:
+    properties:
+      text:
+        type: string
+      type:
+        description: '"sender" | "keyword" | "subject"'
+        type: string
+    type: object
+  handlers.SuggestionsResponse:
+    properties:
+      suggestions:
+        items:
+          $ref: '#/definitions/handlers.Suggestion'
+        type: array
     type: object
   handlers.SummarizeRequest:
     properties:
@@ -55,6 +111,17 @@ definitions:
         type: integer
       url:
         type: string
+    type: object
+  models.CreateColumnRequest:
+    properties:
+      color:
+        type: string
+      gmailLabel:
+        type: string
+      label:
+        type: string
+    required:
+    - label
     type: object
   models.Email:
     properties:
@@ -159,6 +226,40 @@ definitions:
       message:
         type: string
     type: object
+  models.GmailLabel:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      type:
+        description: '"system" or "user"'
+        type: string
+    type: object
+  models.KanbanColumn:
+    properties:
+      color:
+        type: string
+      gmailLabel:
+        description: mapped Gmail label (e.g., "STARRED", "IMPORTANT")
+        type: string
+      id:
+        type: string
+      isDefault:
+        description: true for system columns
+        type: boolean
+      key:
+        description: internal key (e.g., "inbox", "todo", "custom_1")
+        type: string
+      label:
+        description: display name
+        type: string
+      order:
+        description: column order
+        type: integer
+      userId:
+        type: string
+    type: object
   models.Mailbox:
     properties:
       icon:
@@ -183,6 +284,26 @@ definitions:
         items:
           $ref: '#/definitions/models.Mailbox'
         type: array
+    type: object
+  models.ReorderColumnsRequest:
+    properties:
+      columnIds:
+        items:
+          type: string
+        type: array
+    required:
+    - columnIds
+    type: object
+  models.UpdateColumnRequest:
+    properties:
+      color:
+        type: string
+      gmailLabel:
+        type: string
+      label:
+        type: string
+      order:
+        type: integer
     type: object
 host: localhost:8080
 info:
@@ -230,6 +351,59 @@ paths:
       summary: Get email detail
       tags:
       - emails
+  /emails/search:
+    get:
+      description: Search emails by fuzzy query (subject, sender, summary)
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Email'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Search emails
+      tags:
+      - emails
+  /gmail/labels:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                $ref: '#/definitions/models.GmailLabel'
+              type: array
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get available Gmail labels
+      tags:
+      - kanban-config
   /kanban:
     get:
       description: Return kanban columns with cards
@@ -251,6 +425,159 @@ paths:
       summary: Get Kanban board
       tags:
       - kanban
+  /kanban/columns:
+    get:
+      description: Get the custom column configuration for the current user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                $ref: '#/definitions/models.KanbanColumn'
+              type: array
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get user's Kanban columns
+      tags:
+      - kanban-config
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Column data
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/models.CreateColumnRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.KanbanColumn'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Create a new Kanban column
+      tags:
+      - kanban-config
+  /kanban/columns/{id}:
+    delete:
+      parameters:
+      - description: Column ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete a Kanban column
+      tags:
+      - kanban-config
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Column ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Update data
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/models.UpdateColumnRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.KanbanColumn'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Update a Kanban column
+      tags:
+      - kanban-config
+  /kanban/columns/reorder:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Column IDs in new order
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/models.ReorderColumnsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Reorder Kanban columns
+      tags:
+      - kanban-config
   /kanban/move:
     post:
       parameters:
@@ -363,7 +690,8 @@ paths:
       - emails
   /mailboxes/{mailboxId}/emails:
     get:
-      description: Returns emails for a specific mailbox with pagination
+      description: Returns emails for a specific mailbox with pagination, filtering
+        and sorting
       parameters:
       - description: Mailbox ID
         in: path
@@ -378,6 +706,24 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: Filter by unread status
+        in: query
+        name: unread
+        type: boolean
+      - description: Filter by emails with attachments
+        in: query
+        name: hasAttachments
+        type: boolean
+      - default: date
+        description: 'Sort field: date, subject, sender'
+        in: query
+        name: sortBy
+        type: string
+      - default: desc
+        description: 'Sort order: asc, desc'
+        in: query
+        name: sortOrder
+        type: string
       produces:
       - application/json
       responses:
@@ -398,6 +744,93 @@ paths:
       summary: List emails
       tags:
       - emails
+  /search/generate-embeddings:
+    post:
+      consumes:
+      - application/json
+      description: Batch generate embeddings for emails that don't have them yet
+      parameters:
+      - description: Request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.GenerateEmbeddingsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: integer
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Generate embeddings for emails
+      tags:
+      - search
+  /search/semantic:
+    post:
+      consumes:
+      - application/json
+      description: Search emails using vector similarity (conceptual relevance)
+      parameters:
+      - description: Search query
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SemanticSearchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SemanticSearchResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Semantic search for emails
+      tags:
+      - search
+  /search/suggestions:
+    get:
+      description: Get auto-complete suggestions based on senders and keywords
+      parameters:
+      - description: Search query prefix
+        in: query
+        name: q
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SuggestionsResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get search suggestions
+      tags:
+      - search
 securityDefinitions:
   ApiKeyAuth:
     in: header

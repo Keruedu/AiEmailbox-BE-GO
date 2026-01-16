@@ -50,16 +50,39 @@ func idFilter(emailID string) bson.M {
 }
 
 // GetKanban returns emails grouped by status for a specific user. Snoozed emails are excluded.
-func (r *EmailRepository) GetKanban(ctx context.Context, userID string) (map[string][]models.Email, error) {
-	// fetch all emails (include snoozed so frontend can render a Snoozed column)
-	// fetch all emails (include snoozed so frontend can render a Snoozed column)
+func (r *EmailRepository) GetKanban(ctx context.Context, userID string, unreadOnly bool, hasAttachmentsOnly bool, sortBy string, sortOrder string) (map[string][]models.Email, error) {
+	// Build base filter
 	filter := bson.M{
 		"userId":    userID,
 		"labels":    bson.M{"$ne": "TRASH"},
 		"mailboxId": bson.M{"$ne": "TRASH"},
 	}
+
+	if unreadOnly {
+		filter["isRead"] = false
+	}
+	if hasAttachmentsOnly {
+		filter["hasAttachments"] = true
+	}
+
 	findOptions := options.Find()
-	findOptions.SetSort(bson.D{{Key: "receivedAt", Value: -1}})
+
+	// Determine sort field and direction
+	direction := -1
+	if strings.ToLower(sortOrder) == "asc" {
+		direction = 1
+	}
+
+	switch strings.ToLower(sortBy) {
+	case "subject":
+		findOptions.SetSort(bson.D{{Key: "subject", Value: direction}})
+	case "sender", "from":
+		// sort by nested field from.email
+		findOptions.SetSort(bson.D{{Key: "from.email", Value: direction}})
+	default:
+		// default: sort by receivedAt
+		findOptions.SetSort(bson.D{{Key: "receivedAt", Value: direction}})
+	}
 
 	cursor, err := r.emailCollection.Find(ctx, filter, findOptions)
 	if err != nil {

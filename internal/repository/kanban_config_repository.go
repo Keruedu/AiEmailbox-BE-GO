@@ -3,8 +3,6 @@ package repository
 import (
 	"aiemailbox-be/internal/models"
 	"context"
-	"fmt"
-	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -90,7 +88,7 @@ func (r *KanbanConfigRepository) UpdateColumnAndReturn(ctx context.Context, colu
 	update := bson.M{"$set": updates}
 	after := options.After
 	opts := options.FindOneAndUpdateOptions{ReturnDocument: &after}
-	
+
 	var updated models.KanbanColumn
 	err := r.collection.FindOneAndUpdate(ctx, filter, update, &opts).Decode(&updated)
 	if err != nil {
@@ -126,25 +124,25 @@ func (r *KanbanConfigRepository) GetMaxOrder(ctx context.Context, userID string)
 func (r *KanbanConfigRepository) ReorderColumns(ctx context.Context, userID string, columnIDs []string) error {
 	// Use BulkWrite for better performance
 	var operations []mongo.WriteModel
-	
+
 	for i, id := range columnIDs {
 		// Use idFilter to handle both ObjectID and string formats
 		idFilter := r.idFilter(id)
 		// Also check userId to ensure user owns the column
 		filter := bson.M{"$and": []bson.M{idFilter, {"userId": userID}}}
 		update := bson.M{"$set": bson.M{"order": i}}
-		
+
 		operation := mongo.NewUpdateOneModel()
 		operation.SetFilter(filter)
 		operation.SetUpdate(update)
 		operations = append(operations, operation)
 	}
-	
+
 	if len(operations) > 0 {
 		_, err := r.collection.BulkWrite(ctx, operations)
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -200,16 +198,4 @@ func (r *KanbanConfigRepository) idFilter(columnID string) bson.M {
 	return bson.M{"_id": columnID}
 }
 
-// generateKey creates a URL-safe key from label
-func generateKey(label string) string {
-	key := strings.ToLower(label)
-	key = strings.ReplaceAll(key, " ", "_")
-	// Remove non-alphanumeric characters except underscore
-	result := ""
-	for _, c := range key {
-		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' {
-			result += string(c)
-		}
-	}
-	return fmt.Sprintf("custom_%s", result)
-}
+// Note: helper generateKey removed as it's unused; keep idFilter above for ID handling.
