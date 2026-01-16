@@ -75,7 +75,13 @@ func (h *KanbanHandler) GetKanban(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	board, err := h.repo.GetKanban(ctx, userID.(string))
+	// read filtering & sorting query params
+	unreadOnly := c.Query("unread") == "true"
+	hasAttachmentsOnly := c.Query("hasAttachments") == "true"
+	sortBy := c.DefaultQuery("sortBy", "date")
+	sortOrder := c.DefaultQuery("sortOrder", "desc")
+
+	board, err := h.repo.GetKanban(ctx, userID.(string), unreadOnly, hasAttachmentsOnly, sortBy, sortOrder)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

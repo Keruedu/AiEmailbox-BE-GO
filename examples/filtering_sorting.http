@@ -1,0 +1,53 @@
+### Test Filtering & Sorting API
+
+# Set your JWT token here
+@token = YOUR_JWT_TOKEN_HERE
+@baseUrl = http://localhost:8080/api
+
+### 1. Get emails with default sorting (newest first)
+GET {{baseUrl}}/mailboxes/INBOX/emails
+Authorization: Bearer {{token}}
+
+### 2. Get emails sorted by date (oldest first)
+GET {{baseUrl}}/mailboxes/INBOX/emails?sortBy=date&sortOrder=asc
+Authorization: Bearer {{token}}
+
+### 3. Get emails sorted by date (newest first)
+GET {{baseUrl}}/mailboxes/INBOX/emails?sortBy=date&sortOrder=desc
+Authorization: Bearer {{token}}
+
+### 4. Filter unread emails only
+GET {{baseUrl}}/mailboxes/INBOX/emails?unread=true
+Authorization: Bearer {{token}}
+
+### 5. Filter emails with attachments only
+GET {{baseUrl}}/mailboxes/INBOX/emails?hasAttachments=true
+Authorization: Bearer {{token}}
+
+### 6. Filter unread emails with attachments
+GET {{baseUrl}}/mailboxes/INBOX/emails?unread=true&hasAttachments=true
+Authorization: Bearer {{token}}
+
+### 7. Sort by subject (A-Z)
+GET {{baseUrl}}/mailboxes/INBOX/emails?sortBy=subject&sortOrder=asc
+Authorization: Bearer {{token}}
+
+### 8. Sort by subject (Z-A)
+GET {{baseUrl}}/mailboxes/INBOX/emails?sortBy=subject&sortOrder=desc
+Authorization: Bearer {{token}}
+
+### 9. Sort by sender email (A-Z)
+GET {{baseUrl}}/mailboxes/INBOX/emails?sortBy=sender&sortOrder=asc
+Authorization: Bearer {{token}}
+
+### 10. Combined: Filter unread + Sort by date (newest)
+GET {{baseUrl}}/mailboxes/INBOX/emails?unread=true&sortBy=date&sortOrder=desc
+Authorization: Bearer {{token}}
+
+### 11. Combined: Filter with attachments + Sort by date (oldest)
+GET {{baseUrl}}/mailboxes/INBOX/emails?hasAttachments=true&sortBy=date&sortOrder=asc
+Authorization: Bearer {{token}}
+
+### 12. All filters + sorting
+GET {{baseUrl}}/mailboxes/INBOX/emails?unread=true&hasAttachments=true&sortBy=date&sortOrder=desc
+Authorization: Bearer {{token}}

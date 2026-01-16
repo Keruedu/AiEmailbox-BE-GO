@@ -77,13 +77,14 @@ func (s *LocalSummaryService) SummarizeText(ctx context.Context, text string) (s
 
 	// If API key present, attempt provider call
 	if s.apiKey != "" {
-		if s.provider == "gemini" {
+		switch s.provider {
+		case "gemini":
 			summ, err := s.callGemini(ctx, text)
 			if err == nil && strings.TrimSpace(summ) != "" {
 				return summ, nil
 			}
 			fmt.Printf("Gemini summary failed, falling back: %v\n", err)
-		} else if s.provider == "" || s.provider == "openai" {
+		case "", "openai":
 			summ, err := s.callOpenAI(ctx, text)
 			if err == nil && strings.TrimSpace(summ) != "" {
 				return summ, nil

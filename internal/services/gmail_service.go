@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -118,7 +119,7 @@ func (s *GmailService) ListMailboxes(ctx context.Context, user *models.User) ([]
 	return mailboxes, nil
 }
 
-func (s *GmailService) ListEmails(ctx context.Context, user *models.User, mailboxID string, page int, perPage int) ([]*models.Email, int, error) {
+func (s *GmailService) ListEmails(ctx context.Context, user *models.User, mailboxID string, page int, perPage int, unreadOnly bool, hasAttachmentsOnly bool, sortBy string, sortOrder string) ([]*models.Email, int, error) {
 	srv, err := s.GetClient(ctx, user)
 	if err != nil {
 		return nil, 0, err
@@ -131,6 +132,28 @@ func (s *GmailService) ListEmails(ctx context.Context, user *models.User, mailbo
 	// Here we will just fetch the latest N messages.
 
 	req := srv.Users.Messages.List("me").LabelIds(mailboxID).MaxResults(int64(perPage))
+
+	// Apply filtering via Gmail query syntax
+	var queryParts []string
+	if unreadOnly {
+		queryParts = append(queryParts, "is:unread")
+	}
+	if hasAttachmentsOnly {
+		queryParts = append(queryParts, "has:attachment")
+	}
+
+	if len(queryParts) > 0 {
+		// Join query parts with space
+		query := ""
+		for i, part := range queryParts {
+			if i > 0 {
+				query += " "
+			}
+			query += part
+		}
+		req = req.Q(query)
+	}
+
 	// If page > 1, we would need to use PageToken.
 	// For this exercise, let's assume simple pagination or just first page for now,
 	// or implement a basic token mechanism if the frontend supports it.
@@ -156,6 +179,32 @@ func (s *GmailService) ListEmails(ctx context.Context, user *models.User, mailbo
 
 		email := s.mapGmailMessageToEmail(msg)
 		emails = append(emails, &email)
+	}
+
+	// Apply sorting (Gmail API returns newest first by default)
+	// If we need different sorting, we do it here using a tagged switch for clarity
+	switch sortBy {
+	case "date":
+		switch sortOrder {
+		case "asc":
+			sort.Slice(emails, func(i, j int) bool { return emails[i].ReceivedAt.Before(emails[j].ReceivedAt) })
+		default:
+			sort.Slice(emails, func(i, j int) bool { return emails[i].ReceivedAt.After(emails[j].ReceivedAt) })
+		}
+	case "subject":
+		switch sortOrder {
+		case "asc":
+			sort.Slice(emails, func(i, j int) bool { return emails[i].Subject < emails[j].Subject })
+		default:
+			sort.Slice(emails, func(i, j int) bool { return emails[i].Subject > emails[j].Subject })
+		}
+	case "sender":
+		switch sortOrder {
+		case "asc":
+			sort.Slice(emails, func(i, j int) bool { return emails[i].From.Email < emails[j].From.Email })
+		default:
+			sort.Slice(emails, func(i, j int) bool { return emails[i].From.Email > emails[j].From.Email })
+		}
 	}
 
 	return emails, int(resp.ResultSizeEstimate), nil
@@ -370,7 +419,7 @@ func (s *GmailService) SendEmail(ctx context.Context, user *models.User, email *
 			toAddresses[i] = to.Email
 		}
 	}
-	
+
 	var ccAddresses []string
 	if len(email.Cc) > 0 {
 		ccAddresses = make([]string, len(email.Cc))
@@ -382,7 +431,7 @@ func (s *GmailService) SendEmail(ctx context.Context, user *models.User, email *
 			}
 		}
 	}
-	
+
 	var bccAddresses []string
 	if len(email.Bcc) > 0 {
 		bccAddresses = make([]string, len(email.Bcc))
@@ -394,14 +443,14 @@ func (s *GmailService) SendEmail(ctx context.Context, user *models.User, email *
 			}
 		}
 	}
-	
+
 	// Add In-Reply-To and References headers for reply/forward
 	if email.ThreadID != "" {
 		message.ThreadId = email.ThreadID
 	}
 
 	var msgString strings.Builder
-	
+
 	// Write common headers
 	msgString.WriteString("To: " + strings.Join(toAddresses, ", ") + "\r\n")
 	if len(ccAddresses) > 0 {
@@ -412,42 +461,42 @@ func (s *GmailService) SendEmail(ctx context.Context, user *models.User, email *
 	}
 	msgString.WriteString("Subject: " + email.Subject + "\r\n")
 	msgString.WriteString("MIME-Version: 1.0\r\n")
-	
+
 	// Check if we have attachments
 	if len(email.Attachments) > 0 {
 		// Use multipart/mixed for email with attachments
 		boundary := "----=_Part_" + fmt.Sprintf("%d", time.Now().UnixNano())
 		msgString.WriteString("Content-Type: multipart/mixed; boundary=\"" + boundary + "\"\r\n\r\n")
-		
+
 		// HTML body part
 		msgString.WriteString("--" + boundary + "\r\n")
 		msgString.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
 		msgString.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
 		msgString.WriteString(base64.StdEncoding.EncodeToString([]byte(email.Body)))
 		msgString.WriteString("\r\n")
-		
+
 		// Attachments
 		for _, att := range email.Attachments {
 			if att == nil || att.Data == nil {
 				continue
 			}
 			msgString.WriteString("--" + boundary + "\r\n")
-			
+
 			// Determine MIME type
 			mimeType := att.MimeType
 			if mimeType == "" {
 				mimeType = "application/octet-stream"
 			}
-			
+
 			msgString.WriteString("Content-Type: " + mimeType + "; name=\"" + att.Filename + "\"\r\n")
 			msgString.WriteString("Content-Disposition: attachment; filename=\"" + att.Filename + "\"\r\n")
 			msgString.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
-			
+
 			// Base64 encode the attachment
 			msgString.WriteString(base64.StdEncoding.EncodeToString(att.Data))
 			msgString.WriteString("\r\n")
 		}
-		
+
 		// End boundary
 		msgString.WriteString("--" + boundary + "--\r\n")
 	} else {

@@ -80,12 +80,16 @@ func (h *EmailHandler) GetMailboxes(c *gin.Context) {
 // GetEmails returns emails for a specific mailbox with pagination
 // GetEmails godoc
 // @Summary      List emails
-// @Description  Returns emails for a specific mailbox with pagination
+// @Description  Returns emails for a specific mailbox with pagination, filtering and sorting
 // @Tags         emails
 // @Produce      json
-// @Param        mailboxId   path      string  true  "Mailbox ID"
-// @Param        page        query     int     false "Page number"
-// @Param        limit       query     int     false "Items per page"
+// @Param        mailboxId      path      string  true   "Mailbox ID"
+// @Param        page           query     int     false  "Page number"
+// @Param        limit          query     int     false  "Items per page"
+// @Param        unread         query     bool    false  "Filter by unread status"
+// @Param        hasAttachments query     bool    false  "Filter by emails with attachments"
+// @Param        sortBy         query     string  false  "Sort field: date, subject, sender" default(date)
+// @Param        sortOrder      query     string  false  "Sort order: asc, desc" default(desc)
 // @Success      200  {object}  models.EmailListResponse
 // @Failure      401  {object}  models.ErrorResponse
 // @Failure      500  {object}  models.ErrorResponse
@@ -105,6 +109,14 @@ func (h *EmailHandler) GetEmails(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("perPage", "50"))
 
+	// Filtering parameters
+	unreadOnly := c.Query("unread") == "true"
+	hasAttachmentsOnly := c.Query("hasAttachments") == "true"
+
+	// Sorting parameters
+	sortBy := c.DefaultQuery("sortBy", "date")
+	sortOrder := c.DefaultQuery("sortOrder", "desc")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -117,7 +129,7 @@ func (h *EmailHandler) GetEmails(c *gin.Context) {
 		return
 	}
 
-	emails, total, err := h.gmailService.ListEmails(ctx, user, mailboxID, page, perPage)
+	emails, total, err := h.gmailService.ListEmails(ctx, user, mailboxID, page, perPage, unreadOnly, hasAttachmentsOnly, sortBy, sortOrder)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "gmail_error",
@@ -236,7 +248,7 @@ func (h *EmailHandler) SearchEmails(c *gin.Context) {
 	// Only if generic query (not too short) and no results so far.
 	if len(emailMap) == 0 && len(query) > 3 {
 		// Fetch all local emails (excluding trash, via GetKanban)
-		kanbanMap, err := h.emailRepo.GetKanban(ctx, user.ID.Hex())
+		kanbanMap, err := h.emailRepo.GetKanban(ctx, user.ID.Hex(), false, false, "date", "desc")
 		if err == nil {
 			// Pre-process candidates for fuzzy search (Sanitize HTML once)
 
@@ -355,13 +367,6 @@ func (s *EmailSource) Len() int {
 	return len(s.items)
 }
 
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
 // GetEmailDetail returns detailed information about a specific email
 // GetEmailDetail godoc
 // @Summary      Get email detail
@@ -441,7 +446,7 @@ func (h *EmailHandler) SendEmail(c *gin.Context) {
 	// Check Content-Type to determine how to parse
 	contentType := c.ContentType()
 	var attachments []*models.Attachment
-	
+
 	if contentType == "multipart/form-data" || c.Request.MultipartForm != nil {
 		// Parse multipart form
 		if err := c.Request.ParseMultipartForm(32 << 20); err != nil { // 32MB max
@@ -451,7 +456,7 @@ func (h *EmailHandler) SendEmail(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		// Get JSON fields from form
 		toJSON := c.PostForm("to")
 		ccJSON := c.PostForm("cc")
@@ -459,7 +464,7 @@ func (h *EmailHandler) SendEmail(c *gin.Context) {
 		req.Subject = c.PostForm("subject")
 		req.Body = c.PostForm("body")
 		req.ThreadID = c.PostForm("threadId")
-		
+
 		// Parse JSON arrays
 		if toJSON != "" {
 			if err := utils.ParseJSON(toJSON, &req.To); err != nil {
@@ -480,7 +485,7 @@ func (h *EmailHandler) SendEmail(c *gin.Context) {
 				req.Bcc = []string{}
 			}
 		}
-		
+
 		// Get files
 		form := c.Request.MultipartForm
 		if form != nil && form.File != nil {
@@ -491,19 +496,19 @@ func (h *EmailHandler) SendEmail(c *gin.Context) {
 					continue
 				}
 				defer file.Close()
-				
+
 				// Read file content
 				content := make([]byte, fileHeader.Size)
 				_, err = file.Read(content)
 				if err != nil {
 					continue
 				}
-				
+
 				attachments = append(attachments, &models.Attachment{
-					Filename:    fileHeader.Filename,
-					MimeType:    fileHeader.Header.Get("Content-Type"),
-					Size:        fileHeader.Size,
-					Data:        content,
+					Filename: fileHeader.Filename,
+					MimeType: fileHeader.Header.Get("Content-Type"),
+					Size:     fileHeader.Size,
+					Data:     content,
 				})
 			}
 		}
@@ -535,12 +540,12 @@ func (h *EmailHandler) SendEmail(c *gin.Context) {
 	for i, to := range req.To {
 		toAddresses[i] = models.EmailAddress{Email: to}
 	}
-	
+
 	ccAddresses := make([]models.EmailAddress, len(req.Cc))
 	for i, cc := range req.Cc {
 		ccAddresses[i] = models.EmailAddress{Email: cc}
 	}
-	
+
 	bccAddresses := make([]models.EmailAddress, len(req.Bcc))
 	for i, bcc := range req.Bcc {
 		bccAddresses[i] = models.EmailAddress{Email: bcc}
