@@ -1,0 +1,81 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'AiEmailbox-BE-GO/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'AiEmailbox-BE-GO/**'
+  workflow_dispatch: {}
+
+jobs:
+  test-build:
+    name: Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ${{ env.GOMODCACHE }}
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Prepare modules
+        run: |
+          go env -w GOPROXY=https://proxy.golang.org,direct
+          go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test ./... -v
+
+      - name: Build server
+        run: go build -v -o bin/server ./cmd/server
+
+  publish-image:
+    name: Build & Publish Docker image
+    runs-on: ubuntu-latest
+    needs: test-build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./AiEmailbox-BE-GO
+          file: ./AiEmailbox-BE-GO/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/aiemailbox-be:latest
+            ghcr.io/${{ github.repository_owner }}/aiemailbox-be:${{ github.sha }}
