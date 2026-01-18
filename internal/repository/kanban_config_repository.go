@@ -32,6 +32,11 @@ func NewKanbanConfigRepository(db *mongo.Database) *KanbanConfigRepository {
 		Keys:    bson.D{{Key: "userId", Value: 1}, {Key: "order", Value: 1}},
 		Options: options.Index().SetName("idx_user_order"),
 	})
+	// Unique index to prevent duplicate columns for same user
+	_, _ = idxView.CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "userId", Value: 1}, {Key: "key", Value: 1}},
+		Options: options.Index().SetName("idx_user_key_unique").SetUnique(true),
+	})
 
 	return r
 }
@@ -166,12 +171,18 @@ func (r *KanbanConfigRepository) InitDefaultColumns(ctx context.Context, userID 
 		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "snoozed", Label: "Snoozed", Order: 4, GmailLabel: "", Color: "#eef2ff", IsDefault: true},                  // indigo-50
 	}
 
-	docs := make([]interface{}, len(defaults))
-	for i := range defaults {
-		docs[i] = defaults[i]
+	// Use BulkWrite with upsert to prevent duplicates
+	var operations []mongo.WriteModel
+	for _, col := range defaults {
+		filter := bson.M{"userId": userID, "key": col.Key}
+		update := bson.M{"$setOnInsert": col}
+		op := mongo.NewUpdateOneModel().SetFilter(filter).SetUpdate(update).SetUpsert(true)
+		operations = append(operations, op)
 	}
 
-	_, err = r.collection.InsertMany(ctx, docs)
+	if len(operations) > 0 {
+		_, err = r.collection.BulkWrite(ctx, operations, options.BulkWrite().SetOrdered(false))
+	}
 	return err
 }
 
