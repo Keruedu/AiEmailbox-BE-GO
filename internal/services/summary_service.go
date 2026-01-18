@@ -92,8 +92,8 @@ func (s *LocalSummaryService) SummarizeText(ctx context.Context, text string) (s
 		}
 	}
 
-	// Local extractive summarizer (free)
-	return extractiveSummary(text, 2, 300), nil
+	// Local extractive summarizer (free) - limited to ~120 chars to fit 3 lines on card
+	return extractiveSummary(text, 2, 120), nil
 }
 
 // callGemini calls Google Gemini API. Returns summary or error.
@@ -109,13 +109,13 @@ func (s *LocalSummaryService) callGemini(ctx context.Context, text string) (stri
 		"contents": []map[string]interface{}{
 			{
 				"parts": []map[string]string{
-					{"text": "Summarize the following email in 2-3 concise sentences:\n\n" + text},
+					{"text": "Summarize this email in 1-2 very short sentences (max 100 characters total). Be extremely concise:\n\n" + text},
 				},
 			},
 		},
 		"generationConfig": map[string]interface{}{
 			"temperature":     0.2,
-			"maxOutputTokens": 200,
+			"maxOutputTokens": 80,
 		},
 	}
 
@@ -174,10 +174,10 @@ func (s *LocalSummaryService) callOpenAI(ctx context.Context, text string) (stri
 	reqBody := map[string]interface{}{
 		"model": model,
 		"messages": []message{
-			{Role: "system", Content: "You are a concise email summarizer. Return a short summary (2-3 sentences)."},
-			{Role: "user", Content: "Summarize the following email:\n\n" + text},
+			{Role: "system", Content: "You are a concise email summarizer. Return a very short summary (1-2 sentences, max 100 characters)."},
+			{Role: "user", Content: "Summarize this email in 1-2 very short sentences (max 100 chars):\n\n" + text},
 		},
-		"max_tokens":  200,
+		"max_tokens":  80,
 		"temperature": 0.2,
 	}
 

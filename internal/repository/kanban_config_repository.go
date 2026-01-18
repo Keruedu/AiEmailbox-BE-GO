@@ -157,13 +157,13 @@ func (r *KanbanConfigRepository) InitDefaultColumns(ctx context.Context, userID 
 		return nil // Already has columns
 	}
 
-	// Default columns
+	// Default columns with colors matching frontend Tailwind palette
 	defaults := []models.KanbanColumn{
-		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "inbox", Label: "Inbox", Order: 0, GmailLabel: "INBOX", IsDefault: true},
-		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "todo", Label: "To Do", Order: 1, GmailLabel: "STARRED", IsDefault: true},
-		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "in_progress", Label: "In Progress", Order: 2, GmailLabel: "IMPORTANT", IsDefault: true},
-		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "done", Label: "Done", Order: 3, GmailLabel: "", IsDefault: true},
-		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "snoozed", Label: "Snoozed", Order: 4, GmailLabel: "", IsDefault: true},
+		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "inbox", Label: "Inbox", Order: 0, GmailLabel: "INBOX", Color: "#eff6ff", IsDefault: true},                 // blue-50
+		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "todo", Label: "To Do", Order: 1, GmailLabel: "STARRED", Color: "#fff7ed", IsDefault: true},                // orange-50
+		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "in_progress", Label: "In Progress", Order: 2, GmailLabel: "IMPORTANT", Color: "#faf5ff", IsDefault: true}, // purple-50
+		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "done", Label: "Done", Order: 3, GmailLabel: "", Color: "#f0fdf4", IsDefault: true},                        // green-50
+		{ID: primitive.NewObjectID().Hex(), UserID: userID, Key: "snoozed", Label: "Snoozed", Order: 4, GmailLabel: "", Color: "#eef2ff", IsDefault: true},                  // indigo-50
 	}
 
 	docs := make([]interface{}, len(defaults))
