@@ -53,6 +53,8 @@ func main() {
 	emailRepo := repository.NewEmailRepository(mongodb.Database)
 	// Week 4: Kanban config repository
 	kanbanConfigRepo := repository.NewKanbanConfigRepository(mongodb.Database)
+	// Statistics repository
+	statisticsRepo := repository.NewStatisticsRepository(mongodb.Database)
 
 	// Initialize services
 	gmailService := services.NewGmailService(cfg)
@@ -69,6 +71,8 @@ func main() {
 	searchHandler := handlers.NewSearchHandler(emailRepo, embeddingService, cfg)
 	// Week 4: Kanban config handler
 	kanbanConfigHandler := handlers.NewKanbanConfigHandler(kanbanConfigRepo, emailRepo, gmailService, cfg)
+	// Statistics handler
+	statisticsHandler := handlers.NewStatisticsHandler(statisticsRepo)
 
 	// Initialize Gin
 	r := gin.Default()
@@ -137,6 +141,9 @@ func main() {
 
 		// Week 4: Gmail labels route
 		protected.GET("/gmail/labels", kanbanConfigHandler.GetGmailLabels)
+
+		// Statistics routes
+		protected.GET("/statistics", statisticsHandler.GetStatistics)
 	}
 
 	// Swagger route
