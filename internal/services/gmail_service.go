@@ -689,7 +689,13 @@ func (s *GmailService) SendEmail(ctx context.Context, user *models.User, email *
 	message.Raw = base64.URLEncoding.EncodeToString([]byte(msgString.String()))
 
 	_, err = srv.Users.Messages.Send("me", &message).Do()
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Invalidate cache for this user after successful send
+	cache.Invalidate(user.ID.Hex())
+	return nil
 }
 
 func (s *GmailService) ModifyEmail(ctx context.Context, user *models.User, emailID string, addLabels, removeLabels []string) error {
@@ -704,8 +710,21 @@ func (s *GmailService) ModifyEmail(ctx context.Context, user *models.User, email
 	}
 
 	_, err = srv.Users.Messages.Modify("me", emailID, req).Do()
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Invalidate cache for this user after successful modification
+	cache.Invalidate(user.ID.Hex())
+	return nil
 }
+
+// InvalidateUserCache removes all cached email data for a specific user.
+// Call this after any operation that modifies email state (star, read, delete, etc.)
+func (s *GmailService) InvalidateUserCache(userID string) {
+	cache.Invalidate(userID)
+}
+
 
 func (s *GmailService) GetAttachment(ctx context.Context, user *models.User, messageID, attachmentID string) ([]byte, error) {
 	srv, err := s.GetClient(ctx, user)
