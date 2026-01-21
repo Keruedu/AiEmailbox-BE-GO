@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"aiemailbox-be/config"
 	"aiemailbox-be/internal/models"
@@ -351,5 +353,8 @@ func (h *KanbanConfigHandler) generateKey(label string) string {
 			result += string(c)
 		}
 	}
-	return "custom_" + result
+	// Add timestamp suffix to ensure uniqueness for columns with same label
+	timestamp := time.Now().UnixNano() / 1000000 // milliseconds
+	return fmt.Sprintf("custom_%s_%d", result, timestamp)
 }
+
