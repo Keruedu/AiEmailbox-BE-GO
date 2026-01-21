@@ -31,3 +31,6 @@ go.work
 # OS
 .DS_Store
 Thumbs.db
+
+# Markdowns
+docs/markdowns/
